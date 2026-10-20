@@ -709,7 +709,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
 export function openEditor(actor) {
   const id = `rps-editor-${actor.id}`;
   const open = foundry.applications.instances.get(id);
-  if (open) { open.cfg = configOf(actor); open.render(true); open.bringToFront?.(); return open; }
+  if (open) { open.cfg = configOf(actor); open.render(true).then(() => { if (open.rendered && open.element) open.bringToFront?.(); }); return open; }
   const app = new ShopEditor(actor);
   app.render(true);
   return app;

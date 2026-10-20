@@ -552,8 +552,9 @@ export function openShop(actor) {
   const id = `rps-shop-${actor.id}`;
   let app = foundry.applications.instances.get(id);
   if (!(app instanceof ShopApp)) app = new ShopApp(actor);
-  app.render({ force: true });
-  app.bringToFront?.();
+  // render() is async: bring the window up only once it exists (a new window has no element yet).
+  const wasOpen = app.rendered;
+  app.render({ force: true }).then(() => { if (wasOpen && app.rendered && app.element) app.bringToFront?.(); }).catch(e => console.error(e));
   return app;
 }
 
