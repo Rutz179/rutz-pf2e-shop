@@ -565,26 +565,47 @@ export function creaturePriceCp(entry) {
   return Math.round([20, 40, 120, 250, 500, 800, 1200, 1800, 2500][lv + 1] ?? 3000 * (lv - 6)) * 10;
 }
 
+/*
+ * Every NPC of the bestiaries, read once per session: getIndex() asks the server again on every call,
+ * and the bestiaries hold thousands of creatures — reading them on each keystroke was what made the tab slow.
+ */
+let CREATURES = null;
+let CREATURES_READY = false;
+
+export function creatureIndexReady() {
+  return CREATURES_READY;
+}
+
+export function creatureIndex() {
+  CREATURES ??= (async () => {
+    const fields = ["system.details.level.value", "system.traits.value", "system.traits.rarity", "system.slug", "flags.PF2e-KR.originalName"];
+    const lists = await Promise.all(creaturePacks().map(async pack => {
+      let idx;
+      try { idx = await pack.getIndex({ fields }); } catch (_) { return []; }
+      const out = [];
+      for (const e of idx) {
+        if (e.type !== "npc") continue;
+        const english = e.flags?.["PF2e-KR"]?.originalName ?? "";
+        out.push({
+          uuid: e.uuid ?? `Compendium.${pack.collection}.Actor.${e._id}`, name: e.name, img: e.img,
+          level: Number(e.system?.details?.level?.value ?? 0), rarity: e.system?.traits?.rarity ?? "common", pack: pack.collection,
+          slug: e.system?.slug || game.pf2e?.system?.sluggify?.(english || e.name) || "",
+          animal: (e.system?.traits?.value ?? []).includes("animal"), hay: `${e.name} ${english}`.toLowerCase()
+        });
+      }
+      return out;
+    }));
+    const all = lists.flat().sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, game.i18n.lang));
+    CREATURES_READY = true;
+    return all;
+  })().catch(err => { CREATURES = null; throw err; });
+  return CREATURES;
+}
+
 export async function searchCreatures(text = "", { animalsOnly = true, levelMax = null } = {}) {
-  const out = [];
   const words = String(text).toLowerCase().split(/\s+/).filter(Boolean);
-  for (const pack of creaturePacks()) {
-    let idx;
-    try { idx = await pack.getIndex({ fields: ["system.details.level.value", "system.traits.value", "system.traits.rarity", "system.slug", "flags.PF2e-KR.originalName"] }); } catch (_) { continue; }
-    for (const e of idx) {
-      if (e.type !== "npc") continue;
-      const traits = e.system?.traits?.value ?? [];
-      if (animalsOnly && !traits.includes("animal")) continue;
-      const level = Number(e.system?.details?.level?.value ?? 0);
-      if (levelMax !== null && level > levelMax) continue;
-      const english = e.flags?.["PF2e-KR"]?.originalName ?? "";
-      const hay = `${e.name} ${english}`.toLowerCase();
-      if (!words.every(w => hay.includes(w))) continue;
-      const slug = e.system?.slug || game.pf2e?.system?.sluggify?.(english || e.name) || "";
-      out.push({ uuid: e.uuid ?? `Compendium.${pack.collection}.Actor.${e._id}`, name: e.name, img: e.img, level, slug, rarity: e.system?.traits?.rarity ?? "common", pack: pack.collection });
-    }
-  }
-  return out.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, game.i18n.lang));
+  const all = await creatureIndex();
+  return all.filter(e => (!animalsOnly || e.animal) && (levelMax === null || e.level <= levelMax) && words.every(w => e.hay.includes(w)));
 }
 
 export async function addCreatures(actor, entries, { qty = 1, perDay = 1, infinite = false } = {}) {

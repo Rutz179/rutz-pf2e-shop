@@ -504,7 +504,8 @@
       "AnimalsOnly": "Animal trait only",
       "MaxLevel": "Max level",
       "Standard": "Add the Player Core animals",
-      "OpenSheet": "Open the creature's sheet"
+      "OpenSheet": "Open the creature's sheet",
+      "Loading": "Reading the bestiaries… (only the first time)"
     },
     "Material": {
       "LevelHint": "Item level of the material — the item takes this level and rarity",

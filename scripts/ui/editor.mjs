@@ -1,7 +1,7 @@
 import { FOOD_CATALOG, foodName } from "../foods.mjs";
 import { MID, debounce, esc, formatCp, randomId, sourceIdOf, t, unitCp } from "../util.mjs";
 import { CATEGORIES, catLabel, loadCatalog, preferMirror, searchCatalog, subLabel, subsOf } from "../catalog.mjs";
-import { BUILTIN_TEMPLATES, formulaPriceCp, addCreatures, stockCuisine, addStock, autofill, buyCreatureCp, buyUnitCp, configOf, creaturePriceCp, exportShop, fillFromTemplate, newEvent, newStep, restock, restockChance, saveConfig, saveTemplate, WEALTH, wealthConfig, searchCreatures, sellUnitCp, shelf, stepFilter, stockOf, templateName, templates } from "../shop.mjs";
+import { BUILTIN_TEMPLATES, formulaPriceCp, addCreatures, stockCuisine, addStock, autofill, buyCreatureCp, buyUnitCp, configOf, creaturePriceCp, exportShop, fillFromTemplate, newEvent, newStep, restock, restockChance, saveConfig, saveTemplate, WEALTH, wealthConfig, searchCreatures, creatureIndex, creatureIndexReady, sellUnitCp, shelf, stepFilter, stockOf, templateName, templates } from "../shop.mjs";
 import { setOpen } from "./shop-sheet.mjs";
 import { RARITY, levelBadge, money, rarityLabel } from "./common.mjs";
 import { MATERIALS } from "../materials.mjs";
@@ -233,9 +233,16 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         <td><input type="checkbox" data-c="infinite" ${c.infinite ? "checked" : ""}></td>
         <td><input type="number" min="0" max="100" value="${c.chance ?? ""}" placeholder="${cfg.restock?.chance?.[c.rarity ?? "common"] ?? 100}" data-c="chance" class="n">%</td>
         <td><button type="button" data-a="c-del" data-ci="${i}"><i class="fa-solid fa-trash"></i></button></td></tr>`).join("");
-    if (!this._cHits || this._cKey !== `${this.ui.cText}|${this.ui.cAnimals}|${this.ui.cLevel}`) {
-      this._cKey = `${this.ui.cText}|${this.ui.cAnimals}|${this.ui.cLevel}`;
-      this._cHits = await searchCreatures(this.ui.cText, { animalsOnly: this.ui.cAnimals, levelMax: Number(this.ui.cLevel) || null });
+    // The bestiaries are read once (in the background the first time — the tab shows at once).
+    const key = `${this.ui.cText}|${this.ui.cAnimals}|${this.ui.cLevel}`;
+    const loading = !creatureIndexReady();
+    if (loading) {
+      this._cHits = [];
+      if (!this._cLoading) this._cLoading = creatureIndex().then(() => { this._cLoading = null; this._cKey = null; if (this.ui.tab === "creatures") this.render(); }).catch(() => { this._cLoading = null; });
+    } else if (!this._cHits || this._cKey !== key) {
+      this._cKey = key;
+      const lv = this.ui.cLevel === "" || this.ui.cLevel === null || this.ui.cLevel === undefined ? null : Number(this.ui.cLevel);
+      this._cHits = await searchCreatures(this.ui.cText, { animalsOnly: this.ui.cAnimals, levelMax: Number.isFinite(lv) ? lv : null });
     }
     const have = new Set(mine.map(c => c.uuid));
     const hits = this._cHits.slice(0, 120).map(e => `<div class="rps-hit ${have.has(e.uuid) ? "have" : ""} rar-${e.rarity}"><span class="rps-lv">${e.level}</span><img src="${esc(e.img)}" alt="" loading="lazy">
@@ -249,8 +256,8 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         <label class="chip"><input type="checkbox" data-u="cAnimals" ${this.ui.cAnimals ? "checked" : ""}> ${t("Creature.AnimalsOnly")}</label>
         <label>${t("Creature.MaxLevel")} <input type="number" min="-1" max="25" value="${this.ui.cLevel}" data-u="cLevel" class="n"></label>
         <button type="button" data-a="c-standard"><i class="fa-solid fa-horse"></i> ${t("Creature.Standard")}</button>
-        <span class="rps-dim">${t("Edit.Found", { n: this._cHits.length, shown: Math.min(120, this._cHits.length) })}</span></div>
-      <div class="list">${hits || `<p class="rps-empty">${t("Shop.NoMatch")}</p>`}</div></div>`;
+        <span class="rps-dim">${loading ? "" : t("Edit.Found", { n: this._cHits.length, shown: Math.min(120, this._cHits.length) })}</span></div>
+      <div class="list">${loading ? `<p class="rps-empty"><i class="fa-solid fa-spinner fa-spin"></i> ${t("Creature.Loading")}</p>` : hits || `<p class="rps-empty">${t("Shop.NoMatch")}</p>`}</div></div>`;
   }
 
   /* ---------------- 템플릿 (editable shop templates) ---------------- */

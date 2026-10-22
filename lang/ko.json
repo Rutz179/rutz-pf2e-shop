@@ -504,7 +504,8 @@
       "AnimalsOnly": "동물 특성만",
       "MaxLevel": "최대 레벨",
       "Standard": "플레이어 코어 동물 일괄 추가",
-      "OpenSheet": "크리처 정보 창 열기"
+      "OpenSheet": "크리처 정보 창 열기",
+      "Loading": "몬스터 도감 읽는 중… (처음 한 번만)"
     },
     "Material": {
       "LevelHint": "재질의 아이템 레벨 — 개조하면 아이템 레벨·희귀도도 이 재질을 따릅니다",
