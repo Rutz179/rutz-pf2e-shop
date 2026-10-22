@@ -1,7 +1,7 @@
 import { clamp, debounce, enrich, esc, formatCp, isPhysical, setting, sourceIdOf, t, unitCp, walletCp } from "../util.mjs";
 import { classify } from "../catalog.mjs";
-import { buyCreatureCp, buyUnitCp, buysCategory, configOf, nextRestockIn, restock, saveConfig, sellUnitCp, shelf, stockOf } from "../shop.mjs";
-import { composeRuneName, etchPlan, materialLabel, materialOffers, plainStats, repairCost, request, runePriceCp, runesOn } from "../trade.mjs";
+import { buyCreatureCp, buyUnitCp, buysCategory, configOf, formulaOffers, formulaPriceCp, knowsFormula, nextRestockIn, restock, saveConfig, sellUnitCp, shelf, stockOf } from "../shop.mjs";
+import { composeRuneName, etchCost, etchPlan, materialLabel, materialOffers, plainStats, repairCost, request, runesOn, transferCost } from "../trade.mjs";
 import { hpOf, stateLabel, stateOf } from "../durability.mjs";
 import { catChips, countCats, levelBadge, money, portrait, rarityLabel, subSelect, traitsHtml } from "./common.mjs";
 
@@ -18,8 +18,8 @@ import { catChips, countCats, levelBadge, money, portrait, rarityLabel, subSelec
  * shop's rates and events; the GM's client carries the trade out.
  * ======================================================================== */
 
-const TABS = ["buy", "creatures", "sell", "repair", "material", "runes"];
-const TAB_ICON = { buy: "fa-cart-shopping", creatures: "fa-paw", sell: "fa-hand-holding-dollar", repair: "fa-hammer", material: "fa-cubes", runes: "fa-hexagon-nodes" };
+const TABS = ["buy", "formulas", "creatures", "sell", "repair", "material", "runes"];
+const TAB_ICON = { buy: "fa-cart-shopping", formulas: "fa-scroll", creatures: "fa-paw", sell: "fa-hand-holding-dollar", repair: "fa-hammer", material: "fa-cubes", runes: "fa-hexagon-nodes" };
 
 function customersOf(user = game.user) {
   const list = game.actors.filter(a => ["character", "party", "familiar"].includes(a.type) && (user.isGM ? a.hasPlayerOwner || a.type === "party" : a.isOwner));
@@ -49,7 +49,13 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
     this.ui = { tab: "buy", cat: "all", sub: "", search: "", sel: null, qty: 1, line: null, runeTarget: null, matTarget: null, creature: null, tf: { from: null, rune: null, to: null } };
     this.customerId = defaultCustomer()?.id ?? null;
     this.descCache = new Map();
-    this.refreshSoon = debounce(() => { if (this.rendered) this.render(); }, 120);
+    // Changes from elsewhere redraw the window — but never under a pressed mouse button
+    // (a redraw between press and release swallows the click).
+    this.refreshSoon = debounce(() => {
+      if (!this.rendered) return;
+      if (this._pressing) { this._redrawAfterPress = true; return; }
+      this.render();
+    }, 150);
   }
 
   get title() {
@@ -68,33 +74,42 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
   /* ---------------- render ---------------- */
 
   async _renderHTML() {
+    const seq = this._seq = (this._seq ?? 0) + 1;
     const cfg = this.cfg;
-    const on = { buy: true, sell: true, creatures: (cfg.creatures ?? []).length > 0, repair: !!cfg.services?.repair?.on, material: !!cfg.services?.material?.on, runes: !!cfg.services?.runes?.on };
+    const on = { buy: true, formulas: !!cfg.formulas?.on && formulaOffers(this.actor, cfg).length > 0, sell: true, creatures: (cfg.creatures ?? []).length > 0, repair: !!cfg.services?.repair?.on, material: !!cfg.services?.material?.on, runes: !!cfg.services?.runes?.on };
     const tabs = TABS.filter(k => on[k]);
     if (!tabs.includes(this.ui.tab)) this.ui.tab = "buy";
     const tab = this.ui.tab;
-    const body = tab === "buy" ? this.buyHtml(cfg) : tab === "sell" ? this.sellHtml(cfg) : tab === "creatures" ? this.creaturesHtml(cfg)
-      : tab === "repair" ? this.repairHtml(cfg) : tab === "material" ? this.materialHtml(cfg) : this.runesHtml(cfg);
+    const body = await (tab === "buy" ? this.buyHtml(cfg) : tab === "formulas" ? this.formulasHtml(cfg) : tab === "sell" ? this.sellHtml(cfg) : tab === "creatures" ? this.creaturesHtml(cfg)
+      : tab === "repair" ? this.repairHtml(cfg) : tab === "material" ? this.materialHtml(cfg) : this.runesHtml(cfg));
     const next = nextRestockIn(cfg);
-    return `<div class="rps rps-theme-${esc(cfg.theme || "gold")} ${cfg.merchant?.show !== false && cfg.merchant?.img ? "" : "no-portrait"}">
-      ${this.merchantHtml(cfg)}
-      <section class="rps-main">
+    // In parts: a tab change only swaps the main pane (the merchant and the portrait stay as they are).
+    return { seq, cls: `rps rps-theme-${esc(cfg.theme || "gold")} ${cfg.merchant?.show !== false && cfg.merchant?.img ? "" : "no-portrait"}`, merchant: this.merchantHtml(cfg), main: `
         <nav class="rps-tabs">${tabs.map(k => `<button type="button" class="${tab === k ? "on" : ""}" data-a="tab" data-tab="${k}"><i class="fa-solid ${TAB_ICON[k]}"></i> ${t(`Tab.${k}`)}</button>`).join("")}
           ${game.user.isGM ? `<span class="gm">
             ${cfg.open ? "" : `<span class="closed"><i class="fa-solid fa-lock"></i> ${t("Shop.Closed")}</span>`}
             <button type="button" data-a="restock" data-tooltip="${esc(t("Shop.RestockHint", { mode: t(`Set.RestockMode.${cfg.restock?.mode === "chance" ? "chance" : "fill"}`), next: next === null ? t("Shop.RestockManual") : t("Shop.RestockIn", { n: next }) }))}"><i class="fa-solid fa-sun"></i></button>
             <button type="button" data-a="edit" data-tooltip="${esc(t("Shop.EditHint"))}"><i class="fa-solid fa-gear"></i> ${t("Shop.Edit")}</button></span>` : ""}
         </nav>
-        ${body}
-      </section>
-    </div>`;
+        ${body}` };
   }
 
   _replaceHTML(result, content) {
+    // An older render that finished after a newer one started (a slow tab, then a quick click on another): drop it.
+    if (result?.seq !== this._seq) return;
     // Keep where each list was scrolled to (a dropdown or a purchase must not jump back to the top).
     const keep = {};
     if (this._lastTab === this.ui.tab) for (const sel of [".rps-list", ".rps-pane", ".rps-rune-list", ".rps-desc"]) keep[sel] = content.querySelector(sel)?.scrollTop ?? 0;
-    content.innerHTML = result;
+    const root = content.querySelector(":scope > .rps");
+    const main = root?.querySelector(":scope > .rps-main");
+    if (main && this._merchantHtml === result.merchant) {
+      root.className = result.cls;
+      main.classList.remove("loading");
+      main.innerHTML = result.main;
+    } else {
+      content.innerHTML = `<div class="${result.cls}">${result.merchant}<section class="rps-main">${result.main}</section></div>`;
+      this._merchantHtml = result.merchant;
+    }
     for (const [sel, top] of Object.entries(keep)) { const el = content.querySelector(sel); if (el && top) el.scrollTop = top; }
     this._lastTab = this.ui.tab;
     // Listeners go on the element itself: after the window is closed and opened again it is a new element.
@@ -102,9 +117,21 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       this._wired = content;
       content.addEventListener("click", ev => this.onClick(ev));
       content.addEventListener("change", ev => this.onChange(ev));
-      content.addEventListener("input", ev => this.onInput(ev));
+      content.addEventListener("input", ev => { if (!ev.isComposing) this.onInput(ev); });
+      content.addEventListener("compositionend", ev => this.onInput(ev));
       content.addEventListener("dblclick", ev => { const row = ev.target.closest(".rps-row"); if (row) this.openSheet(row.dataset.id); });
       content.addEventListener("keydown", ev => this.onKey(ev));
+      content.addEventListener("pointerdown", () => {
+        this._pressing = true;
+        const up = () => {
+          this._pressing = false;
+          window.removeEventListener("pointerup", up, true);
+          window.removeEventListener("pointercancel", up, true);
+          if (this._redrawAfterPress) { this._redrawAfterPress = false; setTimeout(() => this.refreshSoon(), 0); }
+        };
+        window.addEventListener("pointerup", up, true);
+        window.addEventListener("pointercancel", up, true);
+      });
     }
     this.fillDetail();
     if (!keep[".rps-list"]) content.querySelector(".rps-row.sel")?.scrollIntoView({ block: "nearest" });
@@ -213,6 +240,29 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
 
   /* ---------- creatures ---------- */
 
+  /* ---------- formulas (recipes) ---------- */
+
+  formulasHtml(cfg) {
+    const who = this.customer;
+    const words = this.ui.search.toLowerCase().split(/\s+/).filter(Boolean);
+    const list = formulaOffers(this.actor, cfg).filter(f => words.every(w => f.name.toLowerCase().includes(w)));
+    const wallet = who ? walletCp(who) : 0;
+    const rows = list.map(f => {
+      const price = formulaPriceCp(cfg, f.level, f.rarity);
+      const known = knowsFormula(who, f.uuid);
+      const why = !who ? t("Shop.NoCustomer") : who.type !== "character" ? t("Formula.OnlyPC") : known ? t("Formula.Known") : wallet < price ? t("Shop.TooDear", { need: formatCp(price - wallet) }) : "";
+      return `<div class="rps-row rps-frow ${known ? "known" : ""} rar-${f.rarity ?? "common"}">
+        <span class="rps-lv">${f.level}</span><img src="${esc(f.img)}" alt="" loading="lazy"><span class="nm">${esc(f.name)}</span>
+        ${known ? `<span class="known"><i class="fa-solid fa-check"></i> ${t("Formula.Known")}</span>` : ""}
+        <button type="button" class="info" data-a="formula-sheet" data-uuid="${esc(f.uuid)}" data-tooltip="${esc(t("Shop.OpenSheet"))}"><i class="fa-solid fa-circle-info"></i></button>
+        ${money(price)}
+        <button type="button" class="rps-go" data-a="buy-formula" data-uuid="${esc(f.uuid)}" ${why ? `disabled data-tooltip="${esc(why)}"` : ""}><i class="fa-solid fa-scroll"></i> ${t("Formula.Buy")}</button></div>`;
+    }).join("");
+    return `<div class="rps-filter"><div class="row"><input type="search" class="rps-search" placeholder="${esc(t("Shop.Search"))}" value="${esc(this.ui.search)}"></div>
+        <p class="rps-hint">${t("Formula.Hint")}</p></div>
+      <div class="rps-body one"><div class="rps-list rps-flist">${rows || `<p class="rps-empty">${t("Formula.None")}</p>`}</div></div>`;
+  }
+
   creaturesHtml(cfg) {
     const list = [...(cfg.creatures ?? [])].sort((a, b) => (a.level ?? 0) - (b.level ?? 0) || a.name.localeCompare(b.name, game.i18n.lang));
     const words = this.ui.search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -251,7 +301,8 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       return `<div class="rps-mat rar-${o.rarity}"><span class="rps-lv" data-tooltip="${esc(t("Material.LevelHint"))}">${o.level}</span>
         <div class="nm"><b>${esc(materialLabel(o.type, o.grade))}</b>${o.rarity !== "common" ? ` <span class="rps-trait rar ${o.rarity}">${esc(rarityLabel(o.rarity))}</span>` : ""}
           <div class="info">${diff}${o.info ? ` · ${esc(o.info)}` : ""}</div>
-          <small>${t("Material.NewPrice")} ${formatCp(o.priceCp)} → <b>${esc(this.matPreview(target, o))}</b></small></div>
+          <small>${t("Material.NewPrice")} ${formatCp(o.priceCp)} → <b>${esc(this.matPreview(target, o))}</b></small>
+          <small class="rps-fee">${t("Material.CostBreak", { diff: formatCp(o.diffCp ?? o.costCp), fee: formatCp(o.feeCp ?? 0) })}</small></div>
         ${money(o.costCp)}<button type="button" class="rps-go" data-a="reforge" data-m="${o.type}" data-g="${o.grade}"><i class="fa-solid fa-hammer"></i> ${t("Material.Do")}</button></div>`;
     }).join("");
     const hidden = all.length - offers.length;
@@ -272,7 +323,7 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
 
   /* ---------- runes ---------- */
 
-  runesHtml(cfg) {
+  async runesHtml(cfg) {
     const who = this.customer;
     const gear = (who?.items ?? []).filter(i => ["weapon", "armor", "shield"].includes(i.type));
     if (!gear.some(i => i.id === this.ui.runeTarget)) this.ui.runeTarget = gear[0]?.id ?? null;
@@ -281,12 +332,16 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
     const now = target ? runesOn(target) : [];
     const runeName = r => r.fundamental ? t(`Rune.Slot.${r.rune}`, { n: r.value }) : (game.i18n.localize(`PF2E.WeaponPropertyRune.${r.rune}.Name`) !== `PF2E.WeaponPropertyRune.${r.rune}.Name`
       ? game.i18n.localize(`PF2E.WeaponPropertyRune.${r.rune}.Name`) : game.i18n.localize(`PF2E.ArmorPropertyRune.${r.rune}.Name`) !== `PF2E.ArmorPropertyRune.${r.rune}.Name` ? game.i18n.localize(`PF2E.ArmorPropertyRune.${r.rune}.Name`) : r.rune);
-    const offers = target ? runes.map(r => {
+    const costs = target ? await Promise.all(runes.map(r => etchCost(cfg, r, target))) : [];
+    const offers = target ? runes.map((r, n) => {
       const plan = etchPlan(r, target);
       const st = stockOf(r);
       const out = !st.infinite && (r.system.quantity ?? 0) <= 0;
-      return `<div class="rps-rune ${plan.ok && !out ? "" : "no"}"><img src="${esc(r.img)}" alt=""><div class="nm"><b>${esc(r.name)}</b>${levelBadge(r)}
-          <small>${plan.ok ? (out ? t("Shop.SoldOut") : this.namePreview(target, plan.update)) : esc(plan.why)}</small></div>${money(buyUnitCp(cfg, r))}
+      const c = costs[n];
+      const how = c.upgrade ? ` <small class="rps-upg" data-tooltip="${esc(t("Rune.UpgradeHint"))}">${t("Rune.Upgrade", { was: formatCp(buyUnitCp(cfg, r)), cost: formatCp(c.base) })}</small>` : "";
+      const fee = c.fee ? ` <small class="rps-fee">${t("Fee.Plus", { cost: formatCp(c.fee) })}</small>` : "";
+      return `<div class="rps-rune ${plan.ok && !out ? "" : "no"}"><img src="${esc(r.img)}" alt=""><div class="nm"><b>${esc(r.name)}</b>${levelBadge(r)}${how}
+          <small>${plan.ok ? (out ? t("Shop.SoldOut") : this.namePreview(target, plan.update)) : esc(plan.why)}</small></div><div class="rps-cost">${money(c.cost)}${fee}</div>
         <button type="button" class="rps-go" data-a="etch" data-id="${r.id}" ${plan.ok && !out ? "" : "disabled"}><i class="fa-solid fa-hexagon-nodes"></i> ${t("Rune.Etch")}</button></div>`;
     }).join("") : "";
     const tf = this.ui.tf;
@@ -387,12 +442,13 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async fillTransferCost(el) {
-    const { from, rune } = this.ui.tf;
+    const { from, rune, to } = this.ui.tf;
     const item = this.customer?.items.get(from);
     if (!item || !rune) { el.innerHTML = ""; return; }
-    const value = Number(item.system?.runes?.[rune] ?? 0);
-    const cp = item.slug === "runestone" ? 0 : Math.round((await runePriceCp(item.type, rune, value)) * 0.1 * (Number(this.cfg.buyRate) || 1));
-    el.innerHTML = money(cp);
+    // Before the target is picked: the rune's own 10%; with it, the swap too.
+    const target = this.customer?.items.get(to) ?? { type: item.type, system: { runes: {} } };
+    const c = await transferCost(this.cfg, item, target, rune);
+    el.innerHTML = `${money(c.cost)}${c.fee ? ` <small class="rps-fee">${t("Fee.Plus", { cost: formatCp(c.fee) })}</small>` : ""}`;
   }
 
   /* ---------------- input ---------------- */
@@ -407,7 +463,14 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
     ev.preventDefault();
     const a = el.dataset.a;
     switch (a) {
-      case "tab": this.ui.tab = el.dataset.tab; this.ui.sel = null; this.ui.qty = 1; this.ui.cat = "all"; this.ui.sub = ""; this.ui.line = null; return this.render();
+      case "tab": {
+        if (this.ui.tab === el.dataset.tab) return;
+        this.ui.tab = el.dataset.tab; this.ui.sel = null; this.ui.qty = 1; this.ui.cat = "all"; this.ui.sub = ""; this.ui.line = null;
+        // Show the switch at once; the pane follows.
+        for (const b of this.element.querySelectorAll(".rps-tabs [data-a=tab]")) b.classList.toggle("on", b === el);
+        this.element.querySelector(".rps-main")?.classList.add("loading");
+        return this.render();
+      }
       case "cat": this.ui.cat = el.dataset.cat; this.ui.sub = ""; return this.render();
       case "pick":
         if (this.ui.sel !== el.dataset.id) { this.ui.sel = el.dataset.id; this.ui.qty = 1; }
@@ -429,6 +492,8 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       }
       case "mat-all": this.ui.matAll = !this.ui.matAll; return this.render();
       case "buy-creature": return this.trade("creature", { creatureId: this.ui.creature });
+      case "buy-formula": return this.trade("formula", { uuid: el.dataset.uuid });
+      case "formula-sheet": { const doc = await fromUuid(el.dataset.uuid).catch(() => null); return doc?.sheet?.render(true); }
       case "reforge": {
         const target = this.customer?.items.get(this.ui.matTarget);
         const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: t("Material.Do") }, content: `<p>${t("Material.Ask", { item: esc(target?.name ?? ""), material: esc(materialLabel(el.dataset.m, el.dataset.g)) })}</p>`, rejectClose: false }).catch(() => false);
@@ -521,7 +586,7 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
     this.element.classList.add("busy");
     try {
       const res = await request(kind, { ...data, shopId: this.actor.id, actorId: who.id });
-      this.say({ buy: "Thanks", sell: "Bought", repair: "Repaired", etch: "Etched", transfer: "Moved", creature: "Creature", material: "Reforged" }[kind], { item: res?.item ?? "" });
+      this.say({ buy: "Thanks", sell: "Bought", repair: "Repaired", etch: "Etched", transfer: "Moved", creature: "Creature", material: "Reforged", formula: "Formula" }[kind], { item: res?.item ?? "" });
       if (kind === "buy" || kind === "sell") this.ui.qty = 1;
       if (kind === "transfer") this.ui.tf = { from: null, rune: null, to: null };
     } catch (err) {
@@ -535,14 +600,19 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
   }
 
   /** The customer's inventory changed (bought, sold, repaired …): show it. */
-  watch(actor) {
-    if (actor?.id === this.customerId || actor?.id === this.actor.id) this.refreshSoon();
+  watch(actor, changes = null) {
+    if (actor?.id === this.actor.id) return this.refreshSoon();
+    if (actor?.id !== this.customerId) return;
+    // The customer's own update (HP, conditions, the clock …) changes nothing here — only what they carry,
+    // their name and picture, and their formulas do. (Item changes come without `changes`.)
+    if (changes && !["name", "img", "items"].some(k => k in changes) && !foundry.utils.hasProperty(changes, "system.crafting")) return;
+    this.refreshSoon();
   }
 }
 
 /** All open shop windows follow their customer's changes too. */
-export function refreshShops(actor) {
-  for (const app of foundry.applications.instances.values()) if (app instanceof ShopApp) app.watch(actor);
+export function refreshShops(actor, changes = null) {
+  for (const app of foundry.applications.instances.values()) if (app instanceof ShopApp) app.watch(actor, changes);
 }
 
 /** Open (or bring up) a shop's window. */

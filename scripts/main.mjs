@@ -5,6 +5,7 @@ import { initSocket, request } from "./trade.mjs";
 import { syncBrokenArmor } from "./durability.mjs";
 import { ShopSheet, openShop, refreshShops, setOpen } from "./ui/shop-sheet.mjs";
 import { installDurabilityWatch } from "./durability-watch.mjs";
+import { installInventoryLog } from "./inventory-log.mjs";
 import { openEditor } from "./ui/editor.mjs";
 import { openManager, shopToChat } from "./ui/manager.mjs";
 import { openDurability } from "./ui/durability-app.mjs";
@@ -25,6 +26,11 @@ function registerSettings() {
     name: t("Settings.Log"), hint: t("Settings.LogHint"), type: String, default: "public",
     choices: { public: t("Settings.LogPublic"), involved: t("Settings.LogInvolved"), gm: t("Settings.LogGM") }
   });
+  s("invLog", {
+    name: t("Settings.InvLog"), hint: t("Settings.InvLogHint"), type: String, default: "gm",
+    choices: { gm: t("Settings.LogGM"), public: t("Settings.LogPublic"), off: t("Settings.InvLogOff") }
+  });
+  s("invLogGM", { name: t("Settings.InvLogGM"), hint: t("Settings.InvLogGMHint"), type: Boolean, default: false });
   s("treasureFull", { name: t("Settings.Treasure"), hint: t("Settings.TreasureHint"), type: Boolean, default: true });
   s("brokenArmor", { name: t("Settings.BrokenArmor"), hint: t("Settings.BrokenArmorHint"), type: Boolean, default: true });
   s("packs", { name: t("Settings.Packs"), hint: t("Settings.PacksHint"), type: String, default: "", onChange: () => forgetCatalog() });
@@ -86,6 +92,7 @@ Hooks.once("init", () => {
 Hooks.once("ready", () => {
   if (game.system.id !== "pf2e" && game.system.id !== "sf2e") return;
   initSocket();
+  installInventoryLog();
   Hooks.on("renderActorDirectory", directoryButton);
   Hooks.on("renderChatMessageHTML", wireChat);
   Hooks.on("updateWorldTime", () => restockByTime());
@@ -98,7 +105,7 @@ Hooks.once("ready", () => {
   Hooks.on("updateItem", touched);
   Hooks.on("createItem", touched);
   Hooks.on("deleteItem", touched);
-  Hooks.on("updateActor", actor => refreshShops(actor));
+  Hooks.on("updateActor", (actor, changes) => refreshShops(actor, changes ?? {}));
   // Rutz's PF2e Forge does durability (marks, notices, broken armor) when it is on.
   if (!forgeActive()) installDurabilityWatch();
   ui.actors?.render?.();

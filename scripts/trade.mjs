@@ -1,5 +1,5 @@
 import { MID, SOCKET, cpToCoins, esc, formatCp, randomId, setting, sourceIdOf, t, walletCp } from "./util.mjs";
-import { buyCreatureCp, buyUnitCp, buysCategory, configOf, saveConfig, sellUnitCp, stockOf, dayNumber } from "./shop.mjs";
+import { buyCreatureCp, buyRateOf, buyUnitCp, buysCategory, configOf, formulaOffers, formulaPriceCp, knowsFormula, saveConfig, sellUnitCp, stockOf, dayNumber } from "./shop.mjs";
 import { MATERIALS, MATERIAL_INFO, MATERIAL_STATS, PLAIN_STATS } from "./materials.mjs";
 import { classify, loadCatalog, runeEffect, runeFits } from "./catalog.mjs";
 import { hpOf, stateOf } from "./durability.mjs";
@@ -148,7 +148,7 @@ async function give(actor, item, qty) {
 }
 
 async function log(shop, cfg, entry, { whisperTo = [] } = {}) {
-  const icon = { buy: "fa-cart-shopping", sell: "fa-hand-holding-dollar", repair: "fa-hammer", etch: "fa-hexagon-nodes", transfer: "fa-right-left", creature: "fa-paw", material: "fa-cubes" }[entry.kind] ?? "fa-coins";
+  const icon = { buy: "fa-cart-shopping", sell: "fa-hand-holding-dollar", repair: "fa-hammer", etch: "fa-hexagon-nodes", transfer: "fa-right-left", creature: "fa-paw", material: "fa-cubes", formula: "fa-scroll" }[entry.kind] ?? "fa-coins";
   const verb = t(`Log.${entry.kind}`, { actor: esc(entry.actor), qty: entry.qty ?? 1, item: entry.link ?? esc(entry.item), extra: esc(entry.extra ?? "") });
   const money = entry.cp ? `<span class="rps-money ${entry.kind === "sell" ? "in" : "out"}">${entry.kind === "sell" ? "+" : "−"}${formatCp(entry.cp, { html: true })}</span>` : "";
   const content = `<div class="rps-log ${entry.kind}"><header><i class="fa-solid ${icon}"></i> <b>${esc(shop.name)}</b></header><p>${verb}</p>${money}</div>`;
@@ -169,6 +169,7 @@ export async function perform(kind, data, user = game.user) {
     case "transfer": return transfer(data, user);
     case "creature": return buyCreature(data, user);
     case "material": return reforge(data, user);
+    case "formula": return buyFormula(data, user);
     case "restock": need(user.isGM, "NotYours"); return null;
   }
   throw new Error(`unknown trade ${kind}`);
@@ -210,8 +211,10 @@ async function sell(data, user) {
     delete src._id;
     src.system.quantity = qty;
     src.system.containerId = null;
-    src.flags = { ...(src.flags ?? {}), [MID]: { stock: { max: qty, perDay: 0, infinite: false, priceMul: 1 } } };
-    const same = shop.items.find(i => sourceIdOf(i) && sourceIdOf(i) === sourceIdOf(item));
+    src.flags = { ...(src.flags ?? {}), [MID]: { stock: { max: qty, perDay: 0, infinite: false, priceMul: 1 }, resold: { from: actor.name, day: dayNumber() } } };
+    // Onto a stack only of the very same kind of thing (not a shelf item that never runs out, not a damaged one onto a whole one).
+    const same = shop.items.find(i => sourceIdOf(i) && sourceIdOf(i) === sourceIdOf(item) && !stockOf(i).infinite
+      && i.name === item.name && Number(i.system?.hp?.value ?? 0) === Number(item.system?.hp?.value ?? 0));
     if (same) await same.update({ "system.quantity": (same.system.quantity ?? 0) + qty });
     else await shop.createEmbeddedDocuments("Item", [src]);
   }
@@ -287,13 +290,59 @@ async function etch(data, user) {
   need(st.infinite || (rune.system.quantity ?? 0) >= 1, "NoStock", { n: 0 });
   const plan = etchPlan(rune, item);
   need(plan.ok, "Custom", { text: plan.why ?? "" });
-  const cost = buyUnitCp(cfg, rune);
+  const { cost, upgrade, fee } = await etchCost(cfg, rune, item);
   await pay(actor, cost);
   await item.update(plan.update);
   await renameByRunes(item);
   if (!st.infinite) await rune.update({ "system.quantity": (rune.system.quantity ?? 0) - 1 });
-  await log(shop, cfg, { kind: "etch", actor: actor.name, user: user.name, item: item.name, extra: rune.name, cp: cost }, { whisperTo: [user.id] });
+  await log(shop, cfg, { kind: "etch", actor: actor.name, user: user.name, item: item.name, extra: `${rune.name}${upgrade ? ` · ${t("Rune.UpgradeNote")}` : ""}${fee ? ` · ${t("Fee.Line", { cost: formatCp(fee) })}` : ""}`, cp: cost }, { whisperTo: [user.id] });
   return { total: cost, item: item.name, rune: rune.name };
+}
+
+/**
+ * What etching costs: a new rune — its shop price; an upgrade (a stronger fundamental rune, or a greater
+ * property rune over its lesser one) — the difference in Price (at the shop's prices); plus the fee.
+ * { cost, base, was, fee, upgrade }
+ */
+export async function etchCost(cfg, runeDoc, item) {
+  const price = buyUnitCp(cfg, runeDoc);
+  const eff = runeEffect(runeDoc);
+  const r = item?.system?.runes ?? {};
+  let was = 0;
+  if (eff?.slot && eff.slot !== "property") {
+    const cur = Number(r[eff.slot] ?? 0);
+    if (cur > 0) {
+      const list = await runePriceCp(item.type, eff.slot, eff.value);
+      const old = await runePriceCp(item.type, eff.slot, cur);
+      // The shop's own price for the new rune, less what the old one is worth at the same rate.
+      was = list > 0 ? Math.round(price * (old / list)) : 0;
+    }
+  } else if (eff?.slot === "property") {
+    const strip = k => String(k).replace(/^(greater|major|true|lesser|moderate|minor)(?=[A-Z])/, "").toLowerCase();
+    const lesser = (r.property ?? []).find(k => strip(k) === strip(eff.key) && k !== eff.key);
+    if (lesser) {
+      const list = await runePriceCp(item.type, eff.key);
+      const old = await runePriceCp(item.type, lesser);
+      was = list > 0 ? Math.round(price * (old / list)) : 0;
+    }
+  }
+  const base = Math.max(0, price - was);
+  const fee = feeCp(cfg, base);
+  return { cost: base + fee, base, was, fee, upgrade: was > 0 };
+}
+
+/** What moving a rune costs: 10% of its Price (and of the rune that swaps back), at the shop's rate, plus the fee. */
+export async function transferCost(cfg, from, to, rune) {
+  if (!from || !to || !rune) return { cost: 0, base: 0, fee: 0 };
+  if (from.slug === "runestone" || from.system?.slug === "runestone") return { cost: 0, base: 0, fee: 0 };
+  const fr = from.system?.runes ?? {};
+  const tr = to.system?.runes ?? {};
+  const fundamental = ["potency", "striking", "resilient", "reinforcing"].includes(rune);
+  let list = await runePriceCp(from.type, rune, Number(fr[rune] ?? 0));
+  if (fundamental && Number(tr[rune] ?? 0) > 0) list += await runePriceCp(to.type, rune, Number(tr[rune]));
+  const base = Math.round(list * 0.1 * buyRateOf(cfg, "rune"));
+  const fee = feeCp(cfg, base);
+  return { cost: base + fee, base, fee };
 }
 
 /** Runes on an item, as rows for the transfer picker: { rune, label, kind, value } */
@@ -335,20 +384,38 @@ async function transfer(data, user) {
     fromUpdate["system.runes.property"] = list.filter(k => k !== data.rune);
     toUpdate["system.runes.property"] = [...target, data.rune];
   }
-  // Price: 10% of the rune's Price (GM Core p. 225); free from a runestone.
-  const cost = from.slug === "runestone" ? 0 : Math.round((await runePriceCp(from.type, data.rune, Number(fr[data.rune] ?? 0))) * 0.1 * (Number(cfg.buyRate) || 1));
+  // Price: 10% of the rune's Price (GM Core) — of both when they swap; free from a runestone; plus the fee.
+  const { cost, fee } = await transferCost(cfg, from, to, data.rune);
   await pay(actor, cost);
   await from.update(fromUpdate);
   await to.update(toUpdate);
   await renameByRunes(from);
   await renameByRunes(to);
-  await log(shop, cfg, { kind: "transfer", actor: actor.name, user: user.name, item: `${from.name} → ${to.name}`, extra: data.runeLabel ?? data.rune, cp: cost }, { whisperTo: [user.id] });
+  await log(shop, cfg, { kind: "transfer", actor: actor.name, user: user.name, item: `${from.name} → ${to.name}`, extra: `${data.runeLabel ?? data.rune}${fee ? ` · ${t("Fee.Line", { cost: formatCp(fee) })}` : ""}`, cp: cost }, { whisperTo: [user.id] });
   return { total: cost };
 }
 
-/** List price of a rune (copper), looked up in the catalog by what it does. */
+/*
+ * Fundamental runes' Prices (gp, GM Core) — what upgrading and moving them costs by the rules:
+ *   upgrading a rune (+1 → +2) costs the difference between the two Prices;
+ *   moving a rune (Transfer) costs 10% of its Price — of both, when two runes swap places.
+ */
+const FUNDAMENTAL_GP = {
+  weapon: { potency: [0, 35, 935, 8935], striking: [0, 65, 1065, 31065] },
+  armor: { potency: [0, 160, 1060, 20560], resilient: [0, 340, 3440, 49440] },
+  shield: { reinforcing: [0, 75, 300, 900, 2500, 8000, 32000] }
+};
+
+/** The smith's fee (shop setting, percent) on top of a rules price. */
+export function feeCp(cfg, cp) {
+  return Math.max(0, Math.round(cp * (Number(cfg.services?.fee ?? 10) || 0) / 100));
+}
+
+/** List price of a rune (copper): fundamental runes from the table, property runes from the catalog. */
 export async function runePriceCp(itemType, rune, value = 0) {
   const kind = itemType === "weapon" ? "weapon" : itemType === "armor" ? "armor" : "shield";
+  const table = FUNDAMENTAL_GP[kind]?.[rune];
+  if (table) return (table[Math.max(0, Math.min(table.length - 1, Number(value) || 0))] ?? 0) * 100;
   const cat = await loadCatalog();
   const hit = cat.list.find(e => {
     if (e.cat !== "rune") return false;
@@ -446,6 +513,23 @@ async function boughtFolder() {
   return game.folders?.find(f => f.type === "Actor" && f.name === name) ?? (await Folder.create({ name, type: "Actor", color: "#6b4f2a" }).catch(() => null));
 }
 
+/** A formula into the character's formula book (Player Core, Formulas: copying it in takes an hour). */
+async function buyFormula(data, user) {
+  const { shop, cfg } = shopFor(data, user);
+  const actor = customerFor(data, user);
+  const offer = formulaOffers(shop, cfg).find(f => f.uuid === data.uuid);
+  need(offer, "NoItem");
+  need(actor.type === "character", "NotYours");
+  need(!knowsFormula(actor, offer.uuid), "KnowsFormula");
+  const total = formulaPriceCp(cfg, offer.level, offer.rarity);
+  await pay(actor, total);
+  if (cfg.purse?.on) cfg.purse.value = Math.min(Number(cfg.purse.max ?? 0), Number(cfg.purse.value ?? 0) + total);
+  const formulas = [...(actor.system?.crafting?.formulas ?? []).map(f => ({ ...f })), { uuid: offer.uuid }];
+  await actor.update({ "system.crafting.formulas": formulas });
+  await log(shop, cfg, { kind: "formula", actor: actor.name, user: user.name, item: offer.name, link: `@UUID[${offer.uuid}]{${esc(offer.name)}}`, qty: 1, cp: total }, { whisperTo: [user.id] });
+  return { total, item: offer.name, qty: 1 };
+}
+
 async function buyCreature(data, user) {
   const { shop, cfg } = shopFor(data, user);
   const actor = customerFor(data, user);
@@ -514,9 +598,12 @@ export function materialOffers(cfg, item) {
         const was = cur.type ? (MATERIALS[kind][cur.type]?.[cur.grade]?.price ?? 0) * 100 : basePriceCp(item);
         price = d.price * 100 + Math.max(0, now - was);
       }
-      const cost = Math.max(0, Math.round((price - now) * (Number(cfg.services?.material?.rate) || 1)));
+      // The rules: an upgrade costs the difference in Price (at the shop's rate) — plus the smith's fee.
+      const diff = Math.max(0, Math.round((price - now) * (Number(cfg.services?.material?.rate) || 1)));
+      const fee = feeCp(cfg, diff);
+      const cost = diff + fee;
       const st = MATERIAL_STATS[type]?.[grade];
-      out.push({ type, grade, level: d.level, rarity: d.rarity, priceCp: price, costCp: cost, stats: st ? (kind === "armor" ? st.item : st.thin) : null, info: materialInfo(type) });
+      out.push({ type, grade, level: d.level, rarity: d.rarity, priceCp: price, costCp: cost, diffCp: diff, feeCp: fee, stats: st ? (kind === "armor" ? st.item : st.thin) : null, info: materialInfo(type) });
     }
   }
   const R = { common: 0, uncommon: 1, rare: 2, unique: 3 };
@@ -569,6 +656,6 @@ async function reforge(data, user) {
   }
   await item.update(upd);
   await renameByRunes(item);
-  await log(shop, cfg, { kind: "material", actor: actor.name, user: user.name, item: item.name, extra: materialLabel(offer.type, offer.grade), cp: offer.costCp }, { whisperTo: [user.id] });
+  await log(shop, cfg, { kind: "material", actor: actor.name, user: user.name, item: item.name, extra: `${materialLabel(offer.type, offer.grade)}${offer.feeCp ? ` · ${t("Fee.Line", { cost: formatCp(offer.feeCp) })}` : ""}`, cp: offer.costCp }, { whisperTo: [user.id] });
   return { total: offer.costCp, item: item.name };
 }

@@ -64,7 +64,8 @@
       "repair": "Repair",
       "runes": "Rune Forge",
       "creatures": "Animals",
-      "material": "Materials"
+      "material": "Materials",
+      "formulas": "Formulas"
     },
     "Talk": {
       "Hello": "Welcome! Take your time and look around.",
@@ -74,7 +75,8 @@
       "Etched": "The rune is set. See how it glows!",
       "Moved": "The rune has been moved.",
       "Creature": "A fine beast. Take good care of it!",
-      "Reforged": "Reforged in the new material."
+      "Reforged": "Reforged in the new material.",
+      "Formula": "The {item} formula — write it down carefully!"
     },
     "Shop": {
       "DefaultName": "New Shop",
@@ -127,7 +129,7 @@
       "NoSlot": "No free property rune slot ({n} slots)",
       "SameKind": "Only between items of the same kind",
       "Transfer": "Transfer a rune",
-      "TransferHint": "Move a rune to another item: 10% of the rune's Price, free from a runestone (GM Core p. 225). Fundamental runes are swapped.",
+      "TransferHint": "Move a rune to other gear: 10% of the rune's Price — 10% of both when fundamental runes swap — plus the work fee. Free from a runestone (GM Core).",
       "From": "From",
       "Which": "Rune",
       "To": "To",
@@ -137,7 +139,10 @@
         "striking": "Striking {n}",
         "resilient": "Resilient {n}",
         "reinforcing": "Reinforcing {n}"
-      }
+      },
+      "Upgrade": "Upgrade: {was} − the rune you have = {cost}",
+      "UpgradeHint": "Rules: a stronger rune costs only the difference between the two Prices (GM Core).",
+      "UpgradeNote": "upgrade (difference)"
     },
     "Trade": {
       "NoGM": "A GM must be online to trade.",
@@ -154,7 +159,8 @@
         "Destroyed": "Destroyed items can't be repaired.",
         "NotDamaged": "Nothing to repair.",
         "Custom": "{text}",
-        "NoPurse": "The merchant can't afford it (funds {have}, needs {need})."
+        "NoPurse": "The merchant can't afford it (funds {have}, needs {need}).",
+        "KnowsFormula": "Already known."
       }
     },
     "Log": {
@@ -173,7 +179,8 @@
         "material": "Material"
       },
       "creature": "<b>{actor}</b> bought {item}.",
-      "material": "<b>{actor}</b>'s {item} was reforged in {extra}."
+      "material": "<b>{actor}</b>'s {item} was reforged in {extra}.",
+      "formula": "{actor} bought the {item} formula"
     },
     "Restock": {
       "Done": "{shop}: restocked {days} day(s) — {n} items",
@@ -241,7 +248,12 @@
       "TableCount": "How many rolls?",
       "TableRoll": "Roll and stock",
       "ChanceHint": "Chance to come back in one restock. Empty: by rarity (Settings tab)",
-      "OneDayHint": "Restock once (the shop's rule: fixed amount or chance rolls)"
+      "OneDayHint": "Restock once (the shop's rule: fixed amount or chance rolls)",
+      "AddFormula": "Sell as a formula (click again to remove)",
+      "FormulaAdded": "Formula added: {item}",
+      "FormulaRemoved": "Formula removed: {item}",
+      "Food": "Food & drink",
+      "FoodHint": "The Rutz food list (the same items as the Gacha and Rutz's PF2e Days). Cheap food: a DC 5 flat check after eating or fatigued; fine and luxury: temporary HP. Uses the quantity / ∞ above."
     },
     "Tpl": {
       "none": "— empty shop —",
@@ -284,7 +296,8 @@
       "Copy": "copy",
       "ResetAsk": "Reset '{name}' to the module's version?",
       "DeleteAsk": "Delete the template '{name}'?",
-      "provisions": "Provisions & tavern (food, drink, everyday goods)"
+      "provisions": "Provisions & tavern (food, drink, everyday goods)",
+      "tavern": "Tavern (meals and drinks)"
     },
     "Set": {
       "Merchant": "Merchant",
@@ -302,7 +315,7 @@
       "SellRate": "Buying price (of list)",
       "RatesHint": "Rules: items usually sell for half their Price (GM Core p. 48); plentiful items 25% or 10%, or refused. Treasure (gems, art) at full price if set.",
       "Buys": "Buys from players",
-      "Resell": "Put what players sell on the shelf",
+      "Resell": "Put what players sell on the shelf (they can buy it back later)",
       "Restock": "Restocking",
       "AutoRestock": "Restock each time a game day passes",
       "Services": "Services",
@@ -334,7 +347,13 @@
       "PurseHint": "Buying from players is paid from this. When it runs out the shop stops buying — so crafting and selling can't print money. It grows when players buy.",
       "MaterialReach": "Show materials up to character level +",
       "MaterialAllowed": "Materials this shop works with ({n})",
-      "All": "all"
+      "All": "all",
+      "FormulaShelf": "Also sell the formulas of what's on the shelf",
+      "FormulaRate": "Price rate",
+      "FormulaUncommon": "Uncommon+ multiplier",
+      "FormulaHint": "Price = Player Core formula price (level 0 5 sp, 1 1 gp, 5 8 gp, 10 50 gp …) × rate. Uncommon and rarer formulas have no price in the rules — the GM's multiplier. Add formulas not on the shelf with 📜 in Add goods.",
+      "Fee": "Work fee",
+      "FeeHint": "Charged on top of the rules price (the rune's Price / the difference / 10%) for etching, upgrading and moving runes and for changing material."
     },
     "Theme": {
       "gold": "Golden shop",
@@ -343,7 +362,7 @@
       "night": "Night market (purple)"
     },
     "Ev": {
-      "Hint": "Active events multiply together. With no category ticked an event applies to everything (sell 80% = 20% off; buy 120% = pays more).",
+      "Hint": "An active event <b>replaces</b> the shop's own rates (sells {buy}% · buys {sell}%) — write it as a % of the list price. Leave a field empty to keep that rate. With categories ticked it applies to those only, and beats an event for everything (among equals, the lower one wins). E.g. buys at 100% = pays the full list price.",
       "Name": "Event name",
       "Buy": "Sells at",
       "Sell": "Buys at",
@@ -354,7 +373,9 @@
         "festival": "Festival (−10%, buys +10%)",
         "runeWeek": "Rune week (runes −15%)",
         "shortage": "Potion shortage (+50%)"
-      }
+      },
+      "BuyHint": "What players pay, as % of the list price (empty: the shop's own rate)",
+      "SellHint": "What the shop pays players, as % of the list price (empty: the shop's own rate)"
     },
     "Ledger": {
       "Net": "Balance:",
@@ -463,7 +484,12 @@
       "DurNotice": "Tell when gear takes damage",
       "DurNoticeHint": "When an item loses Hit Points, its owners and the GM get a whisper (stressed when it breaks).",
       "Minion": "Bought animals are minions",
-      "MinionHint": "Animals (NPCs) bought at a shop get the minion trait — they act when commanded."
+      "MinionHint": "Animals (NPCs) bought at a shop get the minion trait — they act when commanded.",
+      "InvLog": "Inventory log in chat",
+      "InvLogHint": "When a player character gains or loses items or coins outside the Rutz modules (dragged from a compendium or the Items tab, taken from a merchant or loot, the sheet's sell button, edits), post it with its source. Using things up (potions, arrows) is not logged.",
+      "InvLogOff": "Off",
+      "InvLogGM": "Log the GM's changes too",
+      "InvLogGMHint": "Off (default): the GM changing a player character's inventory is not logged."
     },
     "Creature": {
       "Folder": "Bought Animals",
@@ -498,7 +524,8 @@
       "Stats": "Hardness {h} · HP {hp} · BT {bt}",
       "StatsBook": "Hardness/HP: see the book",
       "ShowAll": "Show {n} more (higher level)",
-      "ShowFit": "Only up to character level +{n}"
+      "ShowFit": "Only up to character level +{n}",
+      "CostBreak": "difference {diff} + fee {fee}"
     },
     "MatInfo": {
       "adamantine": "Extremely hard; gets past resistances only adamantine bypasses.",
@@ -538,6 +565,41 @@
       "squareMealDesc": "A hot, filling meal. Counts as a day's food (Rutz's PF2e Days).",
       "fineDining": "Fine dining",
       "fineDiningDesc": "A famous cook's courses. Counts as a day's food (Rutz's PF2e Days)."
+    },
+    "Formula": {
+      "Buy": "Buy formula",
+      "Known": "known",
+      "OnlyPC": "Only characters learn formulas",
+      "None": "No formulas for sale.",
+      "Hint": "A bought formula goes into the character's formula book (copying it in takes 1 hour, Player Core). Prices from the formula price table by item level."
+    },
+    "Inv": {
+      "Title": "Inventory log",
+      "Added": "Item added",
+      "Removed": "Item removed",
+      "Sold": "Sold",
+      "Bought": "Bought",
+      "Changed": "Inventory changed",
+      "CoinsIn": "Coins gained",
+      "CoinsOut": "Coins lost",
+      "FromPack": "Source: compendium “{pack}”",
+      "FromWorld": "Source: Items tab (world item)",
+      "FromMerchant": "Source: merchant “{name}”",
+      "FromLoot": "Source: loot “{name}”",
+      "FromParty": "Source: party stash “{name}”",
+      "FromActor": "Source: moved from “{name}”",
+      "FromSell": "Source: the sheet's sell button",
+      "FromSheet": "Source: made on the sheet (new item, quantity or coins typed in)"
+    },
+    "Quality": {
+      "poor": "cheap",
+      "plain": "plain",
+      "fine": "fine",
+      "luxury": "luxury"
+    },
+    "Fee": {
+      "Line": "fee {cost}",
+      "Plus": "(incl. fee {cost})"
     }
   }
 }

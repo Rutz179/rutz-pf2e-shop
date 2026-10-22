@@ -183,6 +183,17 @@ function entryOf(e, pack) {
   };
 }
 
+/** "경갑" / "검 · 군용" — the sub-category (and a weapon's category), shown in lists and searchable. */
+export function subTag(e) {
+  const parts = [subLabel(e.cat, e.sub)];
+  if (e.cat === "weapon") {
+    const c = e.system?.category;
+    const key = c && CONFIG.PF2E?.weaponCategories?.[c];
+    if (key) parts.push(game.i18n.localize(key));
+  }
+  return parts.filter(x => x && x !== "other").join(" · ");
+}
+
 export async function loadCatalog({ force = false } = {}) {
   if (catalog && !force) return catalog;
   if (loading && !force) return loading;
@@ -196,6 +207,8 @@ export async function loadCatalog({ force = false } = {}) {
         if (!TYPES.has(e.type)) continue;
         const entry = entryOf(e, pack);
         if (seen.has(entry.uuid)) continue;
+        entry.tag = subTag(entry);
+        entry.search += ` ${entry.tag.toLowerCase()}`;
         seen.add(entry.uuid);
         list.push(entry);
       }

@@ -1,3 +1,4 @@
+import { FOOD_CATALOG, foodName, foodSource } from "./foods.mjs";
 import { MID, clamp, randomId, setting, sourceIdOf, t, unitCp } from "./util.mjs";
 import { classify, loadCatalog, preferMirror, searchCatalog } from "./catalog.mjs";
 
@@ -19,14 +20,14 @@ export const SHEET_ID = `${MID}.ShopSheet`;
 
 export function defaultConfig() {
   return {
-    version: 1,
+    version: 2,
     title: "", greeting: "", farewell: "",
     merchant: { name: "", img: "", show: true },
     theme: "gold",
     open: true,
     buyRate: 1, sellRate: 0.5,
     buys: [],                    // categories bought from players ([] = everything)
-    resell: false,               // what players sell goes on the shelf
+    resell: true,                // what players sell goes on the shelf (to be bought back later)
     events: [],                  // { id, name, active, buy, sell, cats: [] }
     // every: days per restock period; mode "fill" (perDay each period) or "chance" (each item rolls, hidden, by rarity)
     restock: { auto: true, lastDay: null, every: 1, mode: "fill", chance: { common: 80, uncommon: 30, rare: 5, unique: 1 } },
@@ -37,10 +38,45 @@ export function defaultConfig() {
     services: {
       repair: { on: false, mode: "percent", percent: 10, perHp: 10 },
       runes: { on: false, transfer: true },
-      material: { on: false, rate: 1, allowed: [], reach: 5 }
+      material: { on: false, rate: 1, allowed: [], reach: 5 },
+      // The smith's fee on top of what the rules charge (runes etched / upgraded / moved, materials): percent.
+      fee: 10
     },
+    // Formulas (recipes) for sale: the GM's list, plus (shelf) the formula of everything on the shelf.
+    formulas: { on: false, shelf: true, rate: 1, uncommon: 2, list: [] },
     ledger: []
   };
+}
+
+/* ---------------- formulas (recipes) ---------------- */
+
+// Player Core, Formulas: price by item level (gp). Uncommon and rarer formulas have no listed price — the GM's multiplier.
+export const FORMULA_GP = [0.5, 1, 2, 3, 5, 8, 13, 18, 25, 35, 50, 70, 100, 150, 225, 325, 500, 750, 1200, 2000, 3500];
+
+export function formulaPriceCp(cfg, level, rarity = "common") {
+  const f = cfg?.formulas ?? {};
+  const base = FORMULA_GP[Math.max(0, Math.min(20, Number(level) || 0))] * 100;
+  const rare = rarity && rarity !== "common" ? Math.max(0, Number(f.uncommon ?? 2) || 0) : 1;
+  return Math.max(1, Math.round(base * (Number(f.rate ?? 1) || 0) * rare));
+}
+
+/** The formulas a shop offers: { uuid, name, img, level, rarity, from: "list" | "shelf" }. */
+export function formulaOffers(shop, cfg = configOf(shop)) {
+  if (!cfg.formulas?.on) return [];
+  const out = new Map();
+  for (const f of cfg.formulas.list ?? []) if (f?.uuid) out.set(f.uuid, { ...f, from: "list" });
+  if (cfg.formulas.shelf) {
+    for (const item of shelf(shop)) {
+      const uuid = sourceIdOf(item);
+      if (!uuid || out.has(uuid) || !["weapon", "armor", "shield", "equipment", "consumable", "ammo", "backpack"].includes(item.type)) continue;
+      out.set(uuid, { uuid, name: item.name, img: item.img, level: Number(item.system?.level?.value ?? 0) || 0, rarity: item.system?.traits?.rarity ?? "common", from: "shelf" });
+    }
+  }
+  return [...out.values()].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, game.i18n.lang));
+}
+
+export function knowsFormula(actor, uuid) {
+  return (actor?.system?.crafting?.formulas ?? []).some(f => f.uuid === uuid);
 }
 
 export function isShop(actor) {
@@ -52,8 +88,17 @@ export function shopList() {
 }
 
 export function configOf(actor) {
-  const raw = actor?.getFlag?.(MID, "shop") ?? {};
-  return foundry.utils.mergeObject(defaultConfig(), foundry.utils.deepClone(raw), { inplace: false, insertKeys: true, insertValues: true });
+  const raw = foundry.utils.deepClone(actor?.getFlag?.(MID, "shop") ?? {});
+  // Shops from before version 2: what players sell now goes on the shelf too.
+  if ((Number(raw.version) || 1) < 2) { raw.resell = true; raw.version = 2; }
+  const cfg = foundry.utils.mergeObject(defaultConfig(), raw, { inplace: false, insertKeys: true, insertValues: true });
+  // Events from before 0.5.2 were factors on the shop's rate; now they set the rate itself.
+  cfg.events = (cfg.events ?? []).map(ev => {
+    if (ev?.abs) return ev;
+    const conv = (v, rate) => { const f = Number(v); return !Number.isFinite(f) || f === 1 || !v ? null : Math.round(f * rate * 100) / 100; };
+    return { ...ev, buy: conv(ev.buy, Number(cfg.buyRate) || 1), sell: conv(ev.sell, Number(cfg.sellRate) || 0), abs: true };
+  });
+  return cfg;
 }
 
 export async function saveConfig(actor, cfg) {
@@ -74,14 +119,45 @@ export function shelf(actor) {
 
 /* ---------------- prices ---------------- */
 
-export function eventFactor(cfg, kind, cat) {
-  let f = 1;
+/**
+ * The rate an active event sets (of the list price) for buying or selling things of a category,
+ * or null when none does. An event replaces the shop's own rate — it is not multiplied in.
+ * An event for chosen categories beats one for everything; among equals the lower one in the list wins.
+ * An empty field (null) leaves that rate alone.
+ */
+export function eventRate(cfg, kind, cat) {
+  let rate = null;
+  let rank = -1;
   for (const ev of cfg.events ?? []) {
     if (!ev.active) continue;
-    if (ev.cats?.length && !ev.cats.includes(cat)) continue;
-    f *= Number(kind === "buy" ? ev.buy : ev.sell) || 1;
+    const specific = ev.cats?.length ? 1 : 0;
+    if (specific && !ev.cats.includes(cat)) continue;
+    const v = kind === "buy" ? ev.buy : ev.sell;
+    if (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) || Number(v) < 0) continue;
+    if (specific >= rank) { rate = Number(v); rank = specific; }
   }
-  return f;
+  return rate;
+}
+
+/** What players pay, as a share of the list price, for things of a category (events included). */
+export function buyRateOf(cfg, cat) {
+  return eventRate(cfg, "buy", cat) ?? (Number(cfg.buyRate) || 1);
+}
+
+/** What the shop pays, as a share of the list price. Treasure sells at full price unless an event names treasure. */
+export function sellRateOf(cfg, cat) {
+  if (cat === "treasure" && setting("treasureFull", true)) {
+    const named = (cfg.events ?? []).some(ev => ev.active && ev.cats?.includes("treasure") && ev.sell !== null && ev.sell !== undefined && ev.sell !== "");
+    return named ? eventRate(cfg, "sell", cat) : 1;
+  }
+  return eventRate(cfg, "sell", cat) ?? (Number(cfg.sellRate) || 0);
+}
+
+/** @deprecated kept for other modules: the event's rate as a factor of the shop's own. */
+export function eventFactor(cfg, kind, cat) {
+  const base = kind === "buy" ? (Number(cfg.buyRate) || 1) : (Number(cfg.sellRate) || 1);
+  const r = eventRate(cfg, kind, cat);
+  return r === null ? 1 : r / base;
 }
 
 /** What a player pays for one (copper, rounded; at least 1 cp for anything with a price). */
@@ -89,16 +165,14 @@ export function buyUnitCp(cfg, item) {
   const base = unitCp(item);
   if (!base) return 0;
   const st = stockOf(item);
-  return Math.max(1, Math.round(base * (Number(cfg.buyRate) || 1) * st.priceMul * eventFactor(cfg, "buy", classify(item).cat)));
+  return Math.max(1, Math.round(base * buyRateOf(cfg, classify(item).cat) * st.priceMul));
 }
 
 /** What the shop pays a player for one. Gems, art and other treasure sell at full price. */
 export function sellUnitCp(cfg, item) {
   const base = unitCp(item);
   if (!base) return 0;
-  const { cat } = classify(item);
-  const rate = cat === "treasure" && setting("treasureFull", true) ? 1 : Number(cfg.sellRate) || 0;
-  return Math.max(0, Math.floor(base * rate * eventFactor(cfg, "sell", cat)));
+  return Math.max(0, Math.floor(base * sellRateOf(cfg, classify(item).cat)));
 }
 
 export function buysCategory(cfg, item) {
@@ -312,36 +386,22 @@ export const BROKEN_ICONS = ["icons/weapons/swords/swords-crossed-steel.webp"];
 const step = (cat, o = {}) => ({ cat, sub: "", lvMin: null, lvMax: 0, lvCap: null, rarity: ["common"], magical: null, legacy: false, count: 0, qty: 1, perDay: 1, infinite: false, text: "", slugs: [], ...o });
 
 /*
- * Things PF2e has no item for — Player Core, Basic Services and Cuisine (prices in copper).
- * The shop makes them as plain consumables; food is flagged so Rutz's PF2e Days eats it.
+ * Food and drink PF2e has no item for: the Rutz food catalog (foods.mjs — the same items
+ * Rutz's PF2e Days eats and the Gacha finds). Cheap food is a gamble on the stomach, fine
+ * food leaves you well fed (Days applies it). The shop sells them like any stock.
  */
-const DRINK = "icons/consumables/drinks/wine-amphora-cup-gray.webp";
-const WINE = "icons/consumables/drinks/wine-amphora-clay-pink.webp";
-export const CUISINE = {
-  ale: { cp: 1, bulk: 0.1, img: DRINK, drink: true },
-  keg: { cp: 20, bulk: 2, img: WINE, drink: true },
-  tea: { cp: 2, bulk: 0.1, img: DRINK, drink: true },
-  wine: { cp: 10, bulk: 0.1, img: WINE, drink: true },
-  fineWine: { cp: 100, bulk: 0.1, img: WINE, drink: true },
-  poorMeal: { cp: 1, bulk: 0.1, img: "icons/consumables/fruit/apple-ripe-red.webp", food: true },
-  squareMeal: { cp: 3, bulk: 0.1, img: "icons/consumables/food/steak-aged-brown.webp", food: true },
-  fineDining: { cp: 100, bulk: 0.1, img: "icons/consumables/meat/hock-leg-stylized.webp", food: true }
-};
+export const CUISINE = FOOD_CATALOG;
+const cuisineBy = (...q) => Object.keys(FOOD_CATALOG).filter(k => q.includes(FOOD_CATALOG[k].quality));
 
-/** Make (or top up) the cuisine items a template lists. */
-export async function stockCuisine(actor, keys = [], { qty = 10 } = {}) {
+/** Make (or top up) catalog food and drink on the shelf. */
+export async function stockCuisine(actor, keys = [], { qty = 10, infinite = true } = {}) {
   const creates = [];
   for (const key of keys) {
-    const c = CUISINE[key];
-    if (!c) continue;
+    if (!FOOD_CATALOG[key]) continue;
     if (actor.items.some(i => i.getFlag(MID, "cuisine") === key)) continue;
-    creates.push({
-      type: "consumable", name: game.i18n.localize(`RPS.Cuisine.${key}`), img: c.img,
-      system: { quantity: qty, price: { value: { cp: c.cp } }, category: "other", bulk: { value: c.bulk }, level: { value: 0 },
-        uses: { value: 1, max: 1, autoDestroy: true }, traits: { value: [], rarity: "common" },
-        description: { value: `<p>${game.i18n.localize(`RPS.Cuisine.${key}Desc`)}</p>` }, equipped: { carryType: "worn", handsHeld: 0 } },
-      flags: { [MID]: { cuisine: key, food: !!c.food, stock: { max: qty, perDay: -1, infinite: true, priceMul: 1 } }, "rutz-pf2e-days": c.food ? { food: true } : {} }
-    });
+    const src = foodSource(key, qty, { [MID]: { cuisine: key, food: FOOD_CATALOG[key].kind === "food", stock: { max: qty, perDay: -1, infinite, priceMul: 1 } } });
+    src.system.equipped = { carryType: "worn", handsHeld: 0 };
+    creates.push(src);
   }
   if (creates.length) await actor.createEmbeddedDocuments("Item", creates);
   return creates.length;
@@ -396,10 +456,16 @@ export const BUILTIN_TEMPLATES = {
     config: { buys: ["magic", "scroll", "treasure"] },
     steps: [step("magic", { lvMin: -3, lvMax: 1, count: 12, perDay: 0 }), step("scroll", { count: 6, perDay: 0 })]
   },
+  tavern: {
+    name: "Tpl.tavern", img: "icons/consumables/drinks/wine-amphora-clay-pink.webp",
+    config: { buys: ["gear"] },
+    cuisine: ["poorMeal", "squareMeal", "stew", "roast", "steak", "fineDining", "feast", "ale", "keg", "tea", "wine", "fruitWine", "fineWine", "dwarvenSpirit"],
+    steps: []
+  },
   provisions: {
     name: "Tpl.provisions", img: "systems/pf2e/icons/equipment/adventuring-gear/rations.webp",
     config: { buys: ["gear"] },
-    cuisine: Object.keys(CUISINE),
+    cuisine: [...cuisineBy("poor", "plain").filter(k => FOOD_CATALOG[k].kind === "food"), "ale", "tea", "herbTea", "wine"],
     steps: [
       step("all", { lvMax: null, slugs: ["rations", "feed-standard", "feed-unique"], qty: 10, perDay: -1, infinite: true }),
       step("all", { lvMax: null, slugs: ["waterskin", "bedroll", "torch", "flint-and-steel", "rope", "soap", "candle", "chalk", "sack", "backpack", "oil-1-pint", "tent-pup"], qty: 4, perDay: -1 })
@@ -546,7 +612,7 @@ export async function stockAnimals(actor, level = 1) {
 }
 
 export function buyCreatureCp(cfg, c) {
-  return Math.max(1, Math.round((Number(c.priceCp) || 0) * (Number(cfg.buyRate) || 1) * eventFactor(cfg, "buy", "companion")));
+  return Math.max(1, Math.round((Number(c.priceCp) || 0) * buyRateOf(cfg, "companion")));
 }
 
 /* ---------------- moving shops between worlds ---------------- */
@@ -593,6 +659,7 @@ export async function importShop(json) {
   return made;
 }
 
+/** A new event: empty rates leave the shop's own rates alone until one is typed in. */
 export function newEvent(name = "") {
-  return { id: randomId(), name, active: true, buy: 1, sell: 1, cats: [] };
+  return { id: randomId(), name, active: true, buy: null, sell: null, cats: [], abs: true };
 }

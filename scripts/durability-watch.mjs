@@ -40,7 +40,7 @@ export function installDurabilityWatch() {
   Hooks.on("renderActorSheetV2", marks);
   Hooks.on("preUpdateItem", (item, changes, options) => {
     if (!hpOf(item).max) return;
-    options[MID] = { ...(options[MID] ?? {}), hpBefore: hpOf(item).value };
+    options[MID] = { ...(options[MID] ?? {}), hpBefore: hpOf(item).value, maxBefore: hpOf(item).max };
   });
   Hooks.on("updateItem", async (item, changes, options, userId) => {
     if (userId !== game.user.id || !setting("durabilityNotice", true)) return;
@@ -49,6 +49,8 @@ export function installDurabilityWatch() {
     if (before === undefined || !actor || actor.getFlag?.(MID, "shop")) return;
     const h = hpOf(item);
     if (h.value >= before) return;
+    // Damage lowers the value, not the maximum (a merged stack of ammunition is not damage).
+    if (!h.max || h.max !== options?.[MID]?.maxBefore || !["weapon", "armor", "shield", "equipment"].includes(item.type)) return;
     const st = stateOf(item);
     const owners = game.users.filter(u => u.isGM || actor.testUserPermission(u, "OWNER")).map(u => u.id);
     const line = t("Dur.Notice", { actor: esc(actor.name), item: esc(item.name), from: before, to: h.value, max: h.max, bt: h.bt });
