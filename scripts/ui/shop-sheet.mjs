@@ -1,5 +1,6 @@
 import { clamp, debounce, enrich, esc, formatCp, isPhysical, setting, sourceIdOf, t, unitCp, walletCp } from "../util.mjs";
 import { classify } from "../catalog.mjs";
+import { PLUS } from "../edition.mjs";
 import { buyCreatureCp, buyUnitCp, buysCategory, configOf, formulaOffers, formulaPriceCp, knowsFormula, nextRestockIn, restock, saveConfig, sellUnitCp, shelf, stockOf } from "../shop.mjs";
 import { composeRuneName, etchCost, etchPlan, materialLabel, materialOffers, plainStats, repairCost, request, runesOn, transferCost } from "../trade.mjs";
 import { hpOf, stateLabel, stateOf } from "../durability.mjs";
@@ -76,12 +77,13 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
   async _renderHTML() {
     const seq = this._seq = (this._seq ?? 0) + 1;
     const cfg = this.cfg;
-    const on = { buy: true, formulas: !!cfg.formulas?.on && formulaOffers(this.actor, cfg).length > 0, sell: true, creatures: (cfg.creatures ?? []).length > 0, repair: !!cfg.services?.repair?.on, material: !!cfg.services?.material?.on, runes: !!cfg.services?.runes?.on };
+    // Formulas, animals, the smithy and the rune forge are the Plus edition's.
+    const on = { buy: true, formulas: PLUS && !!cfg.formulas?.on && formulaOffers(this.actor, cfg).length > 0, sell: true, creatures: PLUS && (cfg.creatures ?? []).length > 0, repair: !!cfg.services?.repair?.on, material: PLUS && !!cfg.services?.material?.on, runes: PLUS && !!cfg.services?.runes?.on };
     const tabs = TABS.filter(k => on[k]);
     if (!tabs.includes(this.ui.tab)) this.ui.tab = "buy";
     const tab = this.ui.tab;
-    const body = await (tab === "buy" ? this.buyHtml(cfg) : tab === "formulas" ? this.formulasHtml(cfg) : tab === "sell" ? this.sellHtml(cfg) : tab === "creatures" ? this.creaturesHtml(cfg)
-      : tab === "repair" ? this.repairHtml(cfg) : tab === "material" ? this.materialHtml(cfg) : this.runesHtml(cfg));
+    // Each tab has its <tab>Html renderer (buyHtml, sellHtml, repairHtml …).
+    const body = await (this[`${tab}Html`] ?? this.buyHtml).call(this, cfg);
     const next = nextRestockIn(cfg);
     // In parts: a tab change only swaps the main pane (the merchant and the portrait stay as they are).
     return { seq, cls: `rps rps-theme-${esc(cfg.theme || "gold")} ${cfg.merchant?.show !== false && cfg.merchant?.img ? "" : "no-portrait"}`, merchant: this.merchantHtml(cfg), main: `
@@ -242,6 +244,7 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
 
   /* ---------- formulas (recipes) ---------- */
 
+  // @plus
   formulasHtml(cfg) {
     const who = this.customer;
     const words = this.ui.search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -262,7 +265,9 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
         <p class="rps-hint">${t("Formula.Hint")}</p></div>
       <div class="rps-body one"><div class="rps-list rps-flist">${rows || `<p class="rps-empty">${t("Formula.None")}</p>`}</div></div>`;
   }
+  // @end-plus
 
+  // @plus
   creaturesHtml(cfg) {
     const list = [...(cfg.creatures ?? [])].sort((a, b) => (a.level ?? 0) - (b.level ?? 0) || a.name.localeCompare(b.name, game.i18n.lang));
     const words = this.ui.search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -278,9 +283,11 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       <div class="rps-body"><div class="rps-list">${rows || `<p class="rps-empty">${t("Creature.None")}</p>`}</div>
       <div class="rps-detail" data-kind="creature">${this.ui.creature ? `<div class="rps-detail-body"></div>` : ""}</div></div>`;
   }
+  // @end-plus
 
   /* ---------- the smithy: precious materials ---------- */
 
+  // @plus
   materialHtml(cfg) {
     const who = this.customer;
     const gear = (who?.items ?? []).filter(i => ["weapon", "armor"].includes(i.type));
@@ -314,15 +321,19 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       <div class="rps-rune-list">${rows || (target ? `<p class="rps-empty">${t("Material.NoOffers")}</p>` : "")}
         ${hidden > 0 || this.ui.matAll ? `<button type="button" class="rps-more" data-a="mat-all">${this.ui.matAll ? t("Material.ShowFit", { n: reach }) : t("Material.ShowAll", { n: hidden })}</button>` : ""}</div></div>`;
   }
+  // @end-plus
 
   /** The item's name once reforged ("+1 타격의 냉철 석궁"). */
+  // @plus
   matPreview(item, o) {
     if (!item || !setting("renameRunes", true)) return "";
     return composeRuneName({ type: item.type, name: item.name, flags: item.flags, getFlag: (m, k) => item.getFlag?.(m, k), system: { runes: item.system?.runes ?? {}, material: { type: o.type, grade: o.grade } } });
   }
+  // @end-plus
 
   /* ---------- runes ---------- */
 
+  // @plus
   async runesHtml(cfg) {
     const who = this.customer;
     const gear = (who?.items ?? []).filter(i => ["weapon", "armor", "shield"].includes(i.type));
@@ -362,17 +373,21 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       <div class="rps-rune-list">${offers || `<p class="rps-empty">${t(runes.length ? "Rune.PickGear" : "Rune.NoneInShop")}</p>`}</div>
       ${transfer}</div>`;
   }
+  // @end-plus
 
   /* ---------- the chosen thing ---------- */
 
   /** What the item will be called after etching ("→ +1 타격 롱소드"). */
+  // @plus
   namePreview(item, update) {
     if (!item || !setting("renameRunes", true)) return "";
     const runes = foundry.utils.deepClone(item.system?.runes ?? {});
     for (const [k, v] of Object.entries(update ?? {})) if (k.startsWith("system.runes.")) runes[k.slice(13)] = v;
     return `→ ${esc(composeRuneName({ type: item.type, system: { runes, material: item.system?.material ?? {} }, name: item.name, flags: item.flags, getFlag: (m, k) => item.getFlag?.(m, k) }))}`;
   }
+  // @end-plus
 
+  // @plus
   async creatureDetail(holder) {
     const cfg = this.cfg;
     const c = (cfg.creatures ?? []).find(x => x.id === this.ui.creature);
@@ -395,11 +410,12 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
         <button type="button" class="rps-go big" data-a="buy-creature" ${block ? "disabled" : ""}><i class="fa-solid fa-paw"></i> ${t("Shop.Buy")}</button>
         ${block ? `<p class="why">${esc(block)}</p>` : ""}</footer>`;
   }
+  // @end-plus
 
   async fillDetail() {
     const holder = this.element?.querySelector(".rps-detail-body");
     if (!holder) return;
-    if (this.ui.tab === "creatures") return this.creatureDetail(holder);
+    if (this.ui.tab === "creatures") return this.creatureDetail?.(holder);
     const kind = this.ui.tab;
     const item = kind === "buy" ? this.actor.items.get(this.ui.sel) : this.customer?.items.get(this.ui.sel);
     if (!item) { holder.innerHTML = ""; return; }
@@ -438,9 +454,10 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
         ${block ? `<p class="why">${esc(block)}</p>` : ""}
       </footer>`;
     const tfCost = this.element.querySelector(".rps-tf-cost");
-    if (tfCost) this.fillTransferCost(tfCost);
+    if (tfCost) this.fillTransferCost?.(tfCost);
   }
 
+  // @plus
   async fillTransferCost(el) {
     const { from, rune, to } = this.ui.tf;
     const item = this.customer?.items.get(from);
@@ -450,6 +467,7 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
     const c = await transferCost(this.cfg, item, target, rune);
     el.innerHTML = `${money(c.cost)}${c.fee ? ` <small class="rps-fee">${t("Fee.Plus", { cost: formatCp(c.fee) })}</small>` : ""}`;
   }
+  // @end-plus
 
   /* ---------------- input ---------------- */
 
@@ -480,6 +498,8 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       case "qty": this.ui.qty = Math.max(1, this.ui.qty + Number(el.dataset.d)); return this.fillDetail();
       case "act": return this.act();
       case "open-sheet": return this.openSheet(el.dataset.id);
+      case "repair": return this.trade("repair", { itemId: el.dataset.id });
+      // @plus
       case "pick-creature":
         this.ui.creature = el.dataset.cid;
         for (const r of this.element.querySelectorAll(".rps-row.sel")) r.classList.remove("sel");
@@ -500,9 +520,9 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
         if (!ok) return;
         return this.trade("material", { itemId: this.ui.matTarget, material: el.dataset.m, grade: el.dataset.g });
       }
-      case "repair": return this.trade("repair", { itemId: el.dataset.id });
       case "etch": return this.trade("etch", { runeId: el.dataset.id, itemId: this.ui.runeTarget });
       case "transfer": return this.trade("transfer", { fromId: this.ui.tf.from, toId: this.ui.tf.to, rune: this.ui.tf.rune });
+      // @end-plus
       case "edit": return game.rutzShop?.edit(this.actor);
       case "restock": {
         // One restock period right now (with the shop's rule: fill, or the hidden chance rolls).
@@ -519,11 +539,13 @@ export class ShopApp extends foundry.applications.api.ApplicationV2 {
       case "customer": this.customerId = el.value; this.ui.sel = null; return this.render();
       case "sub": this.ui.sub = el.value; return this.render();
       case "qty-set": this.ui.qty = Math.max(1, Number(el.value) || 1); return this.fillDetail();
+      // @plus
       case "rune-target": this.ui.runeTarget = el.value; return this.render();
       case "mat-target": this.ui.matTarget = el.value; return this.render();
       case "tf-from": this.ui.tf = { from: el.value || null, rune: null, to: null }; return this.render();
       case "tf-rune": this.ui.tf.rune = el.value || null; return this.render();
       case "tf-to": this.ui.tf.to = el.value || null; return this.render();
+      // @end-plus
     }
   }
 

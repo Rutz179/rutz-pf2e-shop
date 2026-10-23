@@ -7,6 +7,11 @@
 # edited by hand. The release gets two files:
 #   module.json  – the manifest Foundry checks for updates
 #   module.zip   – the package Foundry downloads
+#
+# Lite / Plus: edition.json's "public" says which edition this public release
+# carries ("plus" during the open beta, "lite" after). The Plus edition for
+# supporters is built on your PC with `node tools/edition.mjs plus` and
+# uploaded to the hub.
 name: Release
 
 on:
@@ -23,13 +28,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Read version from tag
         id: version
         run: echo "number=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      # Stamp the version and the install/update URLs into the manifest that
-      # ships with this release. Foundry follows "manifest" to find updates
-      # and downloads from "download".
       - name: Stamp module.json
         env:
           VERSION: ${{ steps.version.outputs.number }}
@@ -45,18 +51,18 @@ jobs:
           mv module.tmp.json module.json
           echo "Releasing version $VERSION"
 
-      # Files go at the root of the zip, which is what Foundry expects.
-      # Anything machine-specific or secret is left out.
+      # Lite or Plus, as edition.json says (Lite leaves the Plus files out).
+      - name: Make the public edition
+        run: node tools/edition.mjs public --in-place
+
       - name: Build module.zip
         run: |
           zip -r module.zip . \
-            -x ".git/*" ".github/*" "dist/*" \
+            -x ".git/*" ".github/*" "dist/*" "tools/*" "edition.json" \
                "*node_modules*" "*package-lock.json" \
                "*.env" \
-               "*/LOG" "*/LOG.old" \
                ".gitignore" ".DS_Store" "*/.DS_Store"
-          echo "--- package contents (without packs) ---"
-          unzip -l module.zip | grep -v "/packs/"
+          unzip -l module.zip
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

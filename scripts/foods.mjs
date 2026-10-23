@@ -34,7 +34,7 @@ export const FOOD_CATALOG = {
   poorMeal:   { kind: "food", quality: "poor", cp: 1, img: IMG.fruit, ko: "허름한 식사", en: "Poor meal", koD: "빵 쪼가리와 묽은 죽.", enD: "A heel of bread and thin gruel." },
   gruel:      { kind: "food", quality: "poor", cp: 1, img: IMG.rations, ko: "묽은 죽 한 봉지", en: "Bag of gruel", koD: "물을 부어 끓이면 그럭저럭 배는 찬다.", enD: "Add water and boil; it fills you, mostly." },
   hardtack:   { kind: "food", quality: "poor", cp: 2, img: IMG.rations, ko: "딱딱한 건빵", en: "Hardtack", koD: "이가 상할 만큼 딱딱하다. 오래 간다.", enD: "Hard enough to chip a tooth. It keeps." },
-  staleBread: { kind: "food", quality: "poor", cp: 1, img: IMG.rations, ko: "묵은 빵", en: "Stale bread", koD: "곰팡이는 떼어 냈다… 아마도.", enD: "The mould has been scraped off. Probably." },
+  staleBread: { kind: "food", quality: "poor", cp: 1, img: IMG.rations, ko: "묵은 빵", en: "Stale bread", koD: "곰팡이는 떼어 냈다… 아마도.", enD: "The mold has been scraped off. Probably." },
   // plain — about a day of Rations
   squareMeal: { kind: "food", quality: "plain", cp: 3, img: IMG.steak, ko: "든든한 식사", en: "Square meal", koD: "따뜻하고 배부른 한 끼.", enD: "A warm, filling meal." },
   honeyBread: { kind: "food", quality: "plain", cp: 3, img: IMG.rations, ko: "꿀 바른 빵", en: "Honey bread", koD: "아직 말랑한 빵에 꿀을 듬뿍.", enD: "Soft bread with plenty of honey." },

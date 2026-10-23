@@ -1,11 +1,14 @@
 import { MID, esc, t } from "./util.mjs";
+import { PLUS } from "./edition.mjs";
 import { forgetCatalog } from "./catalog.mjs";
 import { ARMS_ICON, BROKEN_ICONS, configOf, createShop, exportShop, importShop, isShop, restock, restockByTime, shopList } from "./shop.mjs";
 import { initSocket, request } from "./trade.mjs";
 import { syncBrokenArmor } from "./durability.mjs";
 import { ShopSheet, openShop, refreshShops, setOpen } from "./ui/shop-sheet.mjs";
 import { installDurabilityWatch } from "./durability-watch.mjs";
+// @plus — the inventory log (Plus edition)
 import { installInventoryLog } from "./inventory-log.mjs";
+// @end-plus
 import { openEditor } from "./ui/editor.mjs";
 import { openManager, shopToChat } from "./ui/manager.mjs";
 import { openDurability } from "./ui/durability-app.mjs";
@@ -22,20 +25,22 @@ export const forgeActive = () => !!game.modules.get("rutz-pf2e-forge")?.active;
 
 function registerSettings() {
   const s = (key, data) => game.settings.register(MID, key, { config: true, scope: "world", ...data });
+  // Plus-only settings stay registered in Lite (their defaults apply) but are not shown.
+  const p = (key, data) => s(key, { ...data, config: PLUS });
   s("logMode", {
     name: t("Settings.Log"), hint: t("Settings.LogHint"), type: String, default: "public",
     choices: { public: t("Settings.LogPublic"), involved: t("Settings.LogInvolved"), gm: t("Settings.LogGM") }
   });
-  s("invLog", {
+  p("invLog", {
     name: t("Settings.InvLog"), hint: t("Settings.InvLogHint"), type: String, default: "gm",
     choices: { gm: t("Settings.LogGM"), public: t("Settings.LogPublic"), off: t("Settings.InvLogOff") }
   });
-  s("invLogGM", { name: t("Settings.InvLogGM"), hint: t("Settings.InvLogGMHint"), type: Boolean, default: false });
+  p("invLogGM", { name: t("Settings.InvLogGM"), hint: t("Settings.InvLogGMHint"), type: Boolean, default: false });
   s("treasureFull", { name: t("Settings.Treasure"), hint: t("Settings.TreasureHint"), type: Boolean, default: true });
   s("brokenArmor", { name: t("Settings.BrokenArmor"), hint: t("Settings.BrokenArmorHint"), type: Boolean, default: true });
   s("packs", { name: t("Settings.Packs"), hint: t("Settings.PacksHint"), type: String, default: "", onChange: () => forgetCatalog() });
-  s("creatureMinion", { name: t("Settings.Minion"), hint: t("Settings.MinionHint"), type: Boolean, default: true });
-  s("renameRunes", { name: t("Settings.RenameRunes"), hint: t("Settings.RenameRunesHint"), type: Boolean, default: true });
+  p("creatureMinion", { name: t("Settings.Minion"), hint: t("Settings.MinionHint"), type: Boolean, default: true });
+  p("renameRunes", { name: t("Settings.RenameRunes"), hint: t("Settings.RenameRunesHint"), type: Boolean, default: true });
   s("durabilityMarks", { name: t("Settings.DurMarks"), hint: t("Settings.DurMarksHint"), type: Boolean, default: true });
   s("durabilityNotice", { name: t("Settings.DurNotice"), hint: t("Settings.DurNoticeHint"), type: Boolean, default: true });
   game.settings.register(MID, "templates", { scope: "world", config: false, type: String, default: "{}" });
@@ -92,7 +97,9 @@ Hooks.once("init", () => {
 Hooks.once("ready", () => {
   if (game.system.id !== "pf2e" && game.system.id !== "sf2e") return;
   initSocket();
+  // @plus
   installInventoryLog();
+  // @end-plus
   Hooks.on("renderActorDirectory", directoryButton);
   Hooks.on("renderChatMessageHTML", wireChat);
   Hooks.on("updateWorldTime", () => restockByTime());

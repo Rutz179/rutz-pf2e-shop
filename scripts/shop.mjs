@@ -1,6 +1,7 @@
 import { FOOD_CATALOG, foodName, foodSource } from "./foods.mjs";
 import { MID, clamp, randomId, setting, sourceIdOf, t, unitCp } from "./util.mjs";
 import { classify, loadCatalog, preferMirror, searchCatalog } from "./catalog.mjs";
+import { PLUS } from "./edition.mjs";
 
 /* ======================================================================== *
  * A shop is a PF2e loot actor with a flag: its stock are ordinary items on
@@ -126,6 +127,7 @@ export function shelf(actor) {
  * An empty field (null) leaves that rate alone.
  */
 export function eventRate(cfg, kind, cat) {
+  if (!PLUS) return null; // price events are the Plus edition's
   let rate = null;
   let rank = -1;
   for (const ev of cfg.events ?? []) {

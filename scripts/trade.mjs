@@ -1,3 +1,4 @@
+import { PLUS } from "./edition.mjs";
 import { MID, SOCKET, cpToCoins, esc, formatCp, randomId, setting, sourceIdOf, t, walletCp } from "./util.mjs";
 import { buyCreatureCp, buyRateOf, buyUnitCp, buysCategory, configOf, formulaOffers, formulaPriceCp, knowsFormula, saveConfig, sellUnitCp, stockOf, dayNumber } from "./shop.mjs";
 import { MATERIALS, MATERIAL_INFO, MATERIAL_STATS, PLAIN_STATS } from "./materials.mjs";
@@ -165,11 +166,13 @@ export async function perform(kind, data, user = game.user) {
     case "buy": return buy(data, user);
     case "sell": return sell(data, user);
     case "repair": return repair(data, user);
+    // @plus — rune forge, animals, the smithy, formulas
     case "etch": return etch(data, user);
     case "transfer": return transfer(data, user);
     case "creature": return buyCreature(data, user);
     case "material": return reforge(data, user);
     case "formula": return buyFormula(data, user);
+    // @end-plus
     case "restock": need(user.isGM, "NotYours"); return null;
   }
   throw new Error(`unknown trade ${kind}`);
@@ -279,6 +282,7 @@ export function etchPlan(runeDoc, item) {
   return { ok: true, update: { [`system.runes.${eff.slot}`]: eff.value } };
 }
 
+// @plus
 async function etch(data, user) {
   const { shop, cfg } = shopFor(data, user);
   need(cfg.services?.runes?.on, "NoService");
@@ -298,6 +302,7 @@ async function etch(data, user) {
   await log(shop, cfg, { kind: "etch", actor: actor.name, user: user.name, item: item.name, extra: `${rune.name}${upgrade ? ` · ${t("Rune.UpgradeNote")}` : ""}${fee ? ` · ${t("Fee.Line", { cost: formatCp(fee) })}` : ""}`, cp: cost }, { whisperTo: [user.id] });
   return { total: cost, item: item.name, rune: rune.name };
 }
+// @end-plus
 
 /**
  * What etching costs: a new rune — its shop price; an upgrade (a stronger fundamental rune, or a greater
@@ -356,6 +361,7 @@ export function runesOn(item) {
   return out;
 }
 
+// @plus
 async function transfer(data, user) {
   const { shop, cfg } = shopFor(data, user);
   need(cfg.services?.runes?.on && cfg.services?.runes?.transfer, "NoService");
@@ -394,6 +400,7 @@ async function transfer(data, user) {
   await log(shop, cfg, { kind: "transfer", actor: actor.name, user: user.name, item: `${from.name} → ${to.name}`, extra: `${data.runeLabel ?? data.rune}${fee ? ` · ${t("Fee.Line", { cost: formatCp(fee) })}` : ""}`, cp: cost }, { whisperTo: [user.id] });
   return { total: cost };
 }
+// @end-plus
 
 /*
  * Fundamental runes' Prices (gp, GM Core) — what upgrading and moving them costs by the rules:
@@ -514,6 +521,7 @@ async function boughtFolder() {
 }
 
 /** A formula into the character's formula book (Player Core, Formulas: copying it in takes an hour). */
+// @plus
 async function buyFormula(data, user) {
   const { shop, cfg } = shopFor(data, user);
   const actor = customerFor(data, user);
@@ -529,7 +537,9 @@ async function buyFormula(data, user) {
   await log(shop, cfg, { kind: "formula", actor: actor.name, user: user.name, item: offer.name, link: `@UUID[${offer.uuid}]{${esc(offer.name)}}`, qty: 1, cp: total }, { whisperTo: [user.id] });
   return { total, item: offer.name, qty: 1 };
 }
+// @end-plus
 
+// @plus
 async function buyCreature(data, user) {
   const { shop, cfg } = shopFor(data, user);
   const actor = customerFor(data, user);
@@ -565,6 +575,7 @@ async function buyCreature(data, user) {
   await log(shop, cfg, { kind: "creature", actor: actor.name, user: user.name, item: c.name, link: made ? `@UUID[${made.uuid}]{${esc(c.name)}}` : null, qty: 1, cp: total }, { whisperTo: [user.id] });
   return { total, item: c.name };
 }
+// @end-plus
 
 /* ---------------- the smithy: precious materials ---------------- */
 
@@ -635,6 +646,7 @@ export function materialLabel(type, grade) {
   return `${m ? loc(m) : type}${grade ? ` (${g ? loc(g) : t(`Material.Grade.${grade}`)})` : ""}`;
 }
 
+// @plus
 async function reforge(data, user) {
   const { shop, cfg } = shopFor(data, user);
   need(cfg.services?.material?.on, "NoService");
@@ -659,3 +671,4 @@ async function reforge(data, user) {
   await log(shop, cfg, { kind: "material", actor: actor.name, user: user.name, item: item.name, extra: `${materialLabel(offer.type, offer.grade)}${offer.feeCp ? ` · ${t("Fee.Line", { cost: formatCp(offer.feeCp) })}` : ""}`, cp: offer.costCp }, { whisperTo: [user.id] });
   return { total: offer.costCp, item: item.name };
 }
+// @end-plus

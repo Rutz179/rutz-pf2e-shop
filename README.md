@@ -1,22 +1,24 @@
 # Rutz's PF2e Shop
 
-JRPG풍 상점 화면과 GM이 쉽게 꾸리는 진열대. 상점은 평범한 PF2e 전리품 액터라 복사·폴더·컴펜디움에 그대로 넣을 수 있습니다.
-*A JRPG-style shop window and an easy shop editor for Pathfinder 2e.*
+A JRPG-style shop window, and a shop editor that takes a minute to stock.
 
-- **사기·팔기** — 분류·검색·수량, 동전 자동 거스름(pp 포함), 채팅 거래 기록과 장부.
-- **상점 종류** — 무기·방어구점, 대장간, 룬 공방, 연금술사, 잡화점, 마법 상점, 동물 상점. 템플릿은 GM이 고칠 수 있습니다.
-- **풍요도와 상점 자금** — 가난한 마을 가게부터 화려한 상점까지 물건 수·희귀도·매입가와 매입 한도가 달라집니다.
-- **룬 공방** — 룬 새기기·옮기기(규칙대로 가격·조건 검사), 새긴 룬이 이름에 붙습니다.
-- **대장간** — 수리, 귀금속 재질 개조(재질 설명·경도·HP 포함), 은·냉철 덩어리 판매.
-- **동물** — 몬스터 도감의 동물을 팔고, 사면 플레이어 소유의 하수인 NPC가 됩니다.
-- **재입고** — 매일/매주/N일마다, 정해진 수만큼 또는 희귀도별 확률로.
-- **이벤트** — 축제 할인, 품귀 같은 가격 배율. 상점은 JSON으로 다른 월드에 옮길 수 있습니다.
+- **Buy & sell** — categories, search, quantities, exact change in coins, chat trade log. Shops are plain loot actors.
+- **Easy stocking** — templates (smith, alchemist, general store …), wealth levels, random fill, roll tables, restocking every N days.
+- **Repairs** at the counter.
+- **Plus** — rune forge (etch and transfer by the rules), precious-material smithing, animals that become minions, formulas for sale, price events (festivals, shortages), the shop ledger and an inventory log.
 
-## 설치
+## Lite & Plus
+This is the free edition; the **Plus** features above come with a Patreon membership (same module, so worlds keep their data). During the open beta every feature is free.
+
+## Install
+Foundry → *Add-on Modules* → *Install Module* → Manifest URL:
 ```
 https://github.com/Rutz179/rutz-pf2e-shop/releases/latest/download/module.json
 ```
-Foundry VTT v13–v14 · PF2e. 내구도·제작은 **Rutz's PF2e Forge**와 함께 쓰면 더 편합니다.
+Foundry VTT v13–v14 · PF2e · English / 한국어
 
-## 여는 곳
-액터 탭 위 「상점」 버튼, 상점 액터·토큰 더블클릭, GM이 올린 채팅 초대장, 매크로 `game.rutzShop.open("상점 이름")`.
+The *Shops* button above the Actors tab, double-clicking a shop actor, or `game.rutzShop.open("name")`.
+
+---
+
+**한국어** — JRPG풍 상점 화면과 쉽게 꾸리는 진열대 — 사고팔기(자동 거스름), 템플릿·풍요도·재입고, 수리, 채팅 거래 기록. Plus: 룬 공방, 귀금속 재질 개조, 동물, 제작 공식 판매, 가격 이벤트, 장부·인벤토리 로그.

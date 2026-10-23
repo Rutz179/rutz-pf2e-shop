@@ -1,3 +1,6 @@
 
 # 개인 기록 (업데이트 로그 등) — 저장소에 올리지 않음
 .private/
+
+# Lite/Plus builds (tools/edition.mjs)
+dist/

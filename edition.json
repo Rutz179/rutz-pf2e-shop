@@ -1,0 +1,4 @@
+{
+  "public": "plus",
+  "plusFiles": ["scripts/inventory-log.mjs"]
+}

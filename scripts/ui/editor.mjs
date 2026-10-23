@@ -5,6 +5,7 @@ import { BUILTIN_TEMPLATES, formulaPriceCp, addCreatures, stockCuisine, addStock
 import { setOpen } from "./shop-sheet.mjs";
 import { RARITY, levelBadge, money, rarityLabel } from "./common.mjs";
 import { MATERIALS } from "../materials.mjs";
+import { PLUS } from "../edition.mjs";
 
 /* ======================================================================== *
  * The GM's shop editor.
@@ -24,7 +25,8 @@ import { MATERIALS } from "../materials.mjs";
 /** A rate (0.85) as a whole percent (85), or "" when there is none. */
 const pctOf = v => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? "" : Math.round(Number(v) * 100));
 
-const TABS = ["stock", "add", "creatures", "templates", "settings", "events", "ledger"];
+// Animals, price events and the ledger are the Plus edition's.
+const TABS = PLUS ? ["stock", "add", "creatures", "templates", "settings", "events", "ledger"] : ["stock", "add", "templates", "settings"];
 const SPELL_FIELDS = ["img", "system.level.value", "system.traits.value", "system.traits.traditions", "system.traits.rarity"];
 
 export class ShopEditor extends foundry.applications.api.ApplicationV2 {
@@ -48,9 +50,10 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
   async _renderHTML() {
     const seq = this._seq = (this._seq ?? 0) + 1;
     this.cfg = configOf(this.actor);
+    if (!TABS.includes(this.ui.tab)) this.ui.tab = "stock";
     const tab = this.ui.tab;
-    const body = tab === "stock" ? this.stockHtml() : tab === "add" ? await this.addHtml() : tab === "creatures" ? await this.creaturesHtml() : tab === "templates" ? await this.templatesHtml()
-      : tab === "settings" ? this.settingsHtml() : tab === "events" ? this.eventsHtml() : this.ledgerHtml();
+    // Each tab has its <tab>Html renderer (stockHtml, addHtml, templatesHtml …).
+    const body = await (this[`${tab}Html`] ?? this.stockHtml).call(this);
     return { seq, html: `<div class="rps-ed">
       <nav class="rps-tabs">${TABS.map(k => `<button type="button" class="${tab === k ? "on" : ""}" data-a="tab" data-tab="${k}">${t(`Edit.Tab.${k}`)}</button>`).join("")}
         <span class="gm"><button type="button" data-a="open-shop"><i class="fa-solid fa-store"></i> ${t("Edit.OpenShop")}</button>
@@ -222,6 +225,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
 
   /* ---------------- 동물 (creatures for sale) ---------------- */
 
+  // @plus
   async creaturesHtml() {
     const cfg = this.cfg;
     const mine = cfg.creatures ?? [];
@@ -259,6 +263,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         <span class="rps-dim">${loading ? "" : t("Edit.Found", { n: this._cHits.length, shown: Math.min(120, this._cHits.length) })}</span></div>
       <div class="list">${loading ? `<p class="rps-empty"><i class="fa-solid fa-spinner fa-spin"></i> ${t("Creature.Loading")}</p>` : hits || `<p class="rps-empty">${t("Shop.NoMatch")}</p>`}</div></div>`;
   }
+  // @end-plus
 
   /* ---------------- 템플릿 (editable shop templates) ---------------- */
 
@@ -372,6 +377,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
           <label class="inline"><input type="radio" name="rmode" data-k="services.repair.mode" value="perHp" ${c.services?.repair?.mode === "perHp" ? "checked" : ""}> ${t("Set.RepairPerHp")}
             <input type="number" min="0" step="1" data-k="services.repair.perHp" value="${c.services?.repair?.perHp ?? 10}" class="n"> cp</label>
           <p class="rps-hint">${t("Set.RepairHint")}</p></div>
+        <!-- @plus -->
         <label class="inline">${chk("services.material.on", c.services?.material?.on)} <b>${t("Tab.material")}</b></label>
         <div class="sub ${c.services?.material?.on ? "" : "off"}"><label class="inline">${t("Set.MaterialRate")} ${pct("services.material.rate", c.services?.material?.rate ?? 1)}</label>
           <label class="inline">${t("Set.MaterialReach")} <input type="number" min="0" max="20" data-k="services.material.reach" value="${c.services?.material?.reach ?? 5}" class="n"></label>
@@ -389,6 +395,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         <label class="inline">${chk("services.runes.on", c.services?.runes?.on)} <b>${t("Tab.runes")}</b></label>
         <div class="sub ${c.services?.runes?.on ? "" : "off"}"><label class="inline">${chk("services.runes.transfer", c.services?.runes?.transfer)} ${t("Set.RuneTransfer")}</label>
           <p class="rps-hint">${t("Set.RuneHint")}</p></div>
+        <!-- @end-plus -->
         <label class="inline"><b>${t("Set.Fee")}</b> <input type="number" min="0" max="100" step="1" data-k="services.fee" value="${c.services?.fee ?? 10}" class="n">%</label>
         <p class="rps-hint">${t("Set.FeeHint")}</p>
       </div></div>`;
@@ -396,6 +403,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
 
   /* ---------------- 이벤트 ---------------- */
 
+  // @plus
   eventsHtml() {
     const evs = this.cfg.events ?? [];
     return `<div class="rps-ed-events"><p class="rps-hint">${t("Ev.Hint", { buy: pctOf(this.cfg.buyRate), sell: pctOf(this.cfg.sellRate) })}</p>
@@ -409,7 +417,9 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       <div class="row"><button type="button" data-a="ev-add"><i class="fa-solid fa-plus"></i> ${t("Ev.Add")}</button>
         ${["sale", "festival", "runeWeek", "shortage"].map(k => `<button type="button" data-a="ev-preset" data-k="${k}">${t(`Ev.Preset.${k}`)}</button>`).join("")}</div></div>`;
   }
+  // @end-plus
 
+  // @plus
   ledgerHtml() {
     const rows = (this.cfg.ledger ?? []).map(l => `<tr class="${l.kind}"><td>${new Date(l.at).toLocaleString()}</td><td>${esc(t(`Log.Kind.${l.kind}`))}</td><td>${esc(l.actor)}<small> (${esc(l.user ?? "")})</small></td>
       <td>${esc(l.item)}${l.qty > 1 ? ` ×${l.qty}` : ""}${l.extra ? ` <small>${esc(l.extra)}</small>` : ""}</td><td>${l.cp ? `${l.kind === "sell" ? "+" : "−"}${formatCp(l.cp)}` : ""}</td></tr>`).join("");
@@ -419,6 +429,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       <div class="scroll"><table class="rps-table"><thead><tr><th>${t("Ledger.When")}</th><th></th><th>${t("Ledger.Who")}</th><th>${t("Ledger.What")}</th><th>${t("Ledger.Money")}</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" class="rps-empty">${t("Ledger.Empty")}</td></tr>`}</tbody></table></div></div>`;
   }
+  // @end-plus
 
   /* ---------------- input ---------------- */
 
@@ -457,6 +468,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         ui.notifications.info(t("Edit.Added", { n }));
         return this.render();
       }
+      // @plus
       case "add-formula": {
         const e = (await loadCatalog()).list.find(x => x.uuid === el.dataset.uuid);
         if (!e) return;
@@ -470,6 +482,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         return this.render();
       }
       case "formula-del": this.cfg.formulas.list.splice(Number(el.dataset.i), 1); await saveConfig(this.actor, this.cfg); return this.render();
+      // @end-plus
       case "add-picked": {
         const o = this.ui.opts;
         const n = await addStock(this.actor, [...this.ui.picked], { qty: o.qty, max: o.qty, perDay: o.perDay, infinite: o.infinite });
@@ -503,6 +516,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         return this.render();
       }
       case "every": this.cfg.restock.every = Number(el.dataset.n) || 1; await saveConfig(this.actor, this.cfg); return this.render();
+      // @plus
       case "c-sheet": return (await fromUuid(el.dataset.uuid).catch(() => null))?.sheet?.render(true);
       case "c-add": {
         const e = this._cHits?.find(x => x.uuid === el.dataset.uuid);
@@ -516,6 +530,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         ui.notifications.info(t("Edit.Added", { n }));
         return this.render();
       }
+      // @end-plus
       case "tpl-pick": this.ui.tpl = el.dataset.tpl; this.ui.tplDraft = null; return this.render();
       case "tpl-new": {
         const key = `own-${randomId().slice(0, 8)}`;
@@ -545,6 +560,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       case "add-spell": await this.addSpellItem(el.dataset.uuid); return this.render();
       case "portrait": return this.pickPortrait();
       case "portrait-clear": this.cfg.merchant.img = ""; await saveConfig(this.actor, this.cfg); return this.render();
+      // @plus
       case "ev-add": this.cfg.events.push(newEvent(t("Ev.New"))); await saveConfig(this.actor, this.cfg); return this.render();
       case "ev-del": this.cfg.events.splice(Number(el.dataset.i), 1); await saveConfig(this.actor, this.cfg); return this.render();
       case "ev-preset": {
@@ -557,6 +573,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
         return this.render();
       }
       case "ledger-clear": this.cfg.ledger = []; await saveConfig(this.actor, this.cfg); return this.render();
+      // @end-plus
     }
   }
 
@@ -576,6 +593,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       if (s === "infinite" || s === "priceMul") this.render();
       return;
     }
+    // @plus
     // creatures for sale
     const crow = el.closest("tr[data-ci]");
     if (crow && el.dataset.c) {
@@ -590,6 +608,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       if (k === "infinite" || k === "priceGp") this.render();
       return;
     }
+    // @end-plus
     // template being edited (kept in the draft until saved)
     const d = this.ui.tplDraft;
     if (d && (el.dataset.st || el.dataset.stR)) {
@@ -669,6 +688,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       this.cfg.buys = on.length === all.length ? [] : on;
       return saveConfig(this.actor, this.cfg);
     }
+    // @plus
     // events
     const evRow = el.closest(".rps-event");
     if (evRow) {
@@ -681,6 +701,7 @@ export class ShopEditor extends foundry.applications.api.ApplicationV2 {
       await saveConfig(this.actor, this.cfg);
       if (el.dataset.ev === "active") this.render();
     }
+    // @end-plus
   }
 
   onInput(ev) {
